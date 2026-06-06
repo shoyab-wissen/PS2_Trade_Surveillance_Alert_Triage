@@ -1,0 +1,42 @@
+[startup] Loading baseline data and building detection engine...
+[startup] Baseline: 442,903 events
+  [DetectionEngine] Building baseline statistics …
+  [DetectionEngine] Ready.
+[startup] Scenario: 16,773 events — auto-detecting alerts...
+  LayeringDetector: 2 alert(s)
+  WashTradingDetector: 1 alert(s)
+  MomentumIgnitionDetector: 1 alert(s)
+  PriceRampingDetector: 2 alert(s)
+  MarkingCloseDetector: 1 alert(s)
+[startup] Pre-detected 7 alert(s)
+[startup] Ready.
+INFO:     127.0.0.1:15491 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:15498 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40600 - "GET /stream HTTP/1.1" 200 OK
+  [DetectionEngine] Building baseline statistics …
+  [DetectionEngine] Ready.
+  LayeringDetector: 2 alert(s)
+  WashTradingDetector: 1 alert(s)
+  MomentumIgnitionDetector: 1 alert(s)
+INFO:     127.0.0.1:40614 - "GET /stream HTTP/1.1" 200 OK
+  PriceRampingDetector: 2 alert(s)
+  MarkingCloseDetector: 1 alert(s)
+  [Claude] API auth failed (401) — switching to mock mode
+INFO:     127.0.0.1:40619 - "GET /stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40635 - "GET /stream/reset HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40635 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:40638 - "GET /metrics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:30903 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43124 - "GET /stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:2282 - "GET /favicon.ico HTTP/1.1" 404 Not Found
+  [DetectionEngine] Building baseline statistics …
+  [DetectionEngine] Ready.
+  LayeringDetector: 2 alert(s)
+  WashTradingDetector: 1 alert(s)
+  MomentumIgnitionDetector: 1 alert(s)
+  PriceRampingDetector: 2 alert(s)
+  MarkingCloseDetector: 1 alert(s)
+  [Claude] API auth failed (401) — switching to mock mode
+INFO:     127.0.0.1:26838 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:26838 - "GET /stream HTTP/1.1" 200 OK
+INFO:     127.0.0.1:22355 - "GET / HTTP/1.1" 200 OK

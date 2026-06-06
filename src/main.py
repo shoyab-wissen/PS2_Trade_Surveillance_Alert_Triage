@@ -7,6 +7,7 @@ from src.ingestion.loader import load_events, load_trader_profiles, load_related
 from src.detection.engine import DetectionEngine
 from src.workflows.watchlist import WatchlistManager
 from src.api.routes import router, AppState
+from src.api.simulation import sim_router
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -54,7 +55,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(router)
+app.include_router(sim_router)   # GET /  → dashboard, GET /stream → SSE
+app.include_router(router)        # API routes: /alerts, /metrics, /demo/run, …
 
 
 @app.get("/health")
