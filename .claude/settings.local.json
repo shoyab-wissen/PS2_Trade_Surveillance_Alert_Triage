@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\shoya\\\\Desktop\\\\Projects\\\\wissen\\\\hackathon3\" -Recurse -Force)",
+      "Bash(Select-Object -Property FullName, Length)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(pip --version)",
+      "Bash(npm --version)",
+      "Bash(pip list *)",
+      "Bash(findstr -i \"numpy scipy pytest\")",
+      "Bash(where python *)",
+      "Bash(python -c \"import sys; print\\(sys.version\\)\")",
+      "Bash(findstr -i \"pydantic\")",
+      "Bash(ls \"C:\\\\Users\\\\shoya\\\\.claude\" 2>&1)"
+    ]
+  }
+}
