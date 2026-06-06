@@ -8,19 +8,50 @@ Claude using prompt caching for cost efficiency.
 
 ## Architecture
 
-```
-  Ingest Layer            Detection Engine             AI Triage              Workflows
-  ─────────────           ────────────────             ─────────              ─────────
-  trades_baseline.csv ──► BaselineStats (z-score) ──► ClaudeTriageClient ──► Jira ticket
-  trades_scenario.csv ──► LayeringDetector         ──►  (prompt caching)  ──► Slack alert
-                       ──► WashTradingDetector       ──► TriageResult        ──► Watchlist
-                       ──► MomentumIgnitionDetector
-                       ──► PriceRampingDetector
-                       ──► MarkingCloseDetector
-                           │
-                           ▼ list[Alert]
-                       FastAPI /demo/run
-                       /alerts /metrics
+```mermaid
+flowchart TB
+    subgraph Ingest["📥 Ingest Layer"]
+        BL[trades_baseline.csv\n30-day history]
+        SC[trades_scenario.csv\nDemo day + anomalies]
+    end
+
+    subgraph Detection["🔍 Detection Engine"]
+        BS[BaselineStats\nper-trader z-scores]
+        LAY[LayeringDetector]
+        WT[WashTradingDetector]
+        MI[MomentumIgnitionDetector]
+        PR[PriceRampingDetector]
+        MC[MarkingCloseDetector]
+    end
+
+    subgraph Triage["🤖 AI Triage — Claude"]
+        CC[ClaudeTriageClient\nPrompt Caching + Few-Shot]
+        FB[Feedback Store\nAnalyst Corrections]
+        TR[TriageResult\nverdict · confidence · cost_usd]
+    end
+
+    subgraph Workflows["⚡ Automated Workflows"]
+        JR[Jira Case\nCOMP-XXXX]
+        SL[Slack Alert\nBlock Kit]
+        WL[Watchlist\n72-hr Monitoring]
+        PDF[PDF Report\nCompliance Summary]
+    end
+
+    subgraph API["🌐 FastAPI"]
+        RT[REST Endpoints\n/alerts /metrics /report /query /feedback]
+        SSE[SSE Dashboard\n/stream — Live Replay]
+    end
+
+    BL --> BS
+    SC --> LAY & WT & MI & PR & MC
+    BS --> LAY & WT & MI & PR & MC
+    LAY & WT & MI & PR & MC -->|list Alert| CC
+    FB -->|few-shot examples| CC
+    CC --> TR
+    TR -->|ESCALATE| JR & SL & WL & PDF
+    TR -->|REVIEW| JR
+    RT <-->|trigger| CC
+    SSE <-->|stream| CC
 ```
 
 ---
@@ -83,13 +114,13 @@ API docs: http://localhost:8000/docs
 
 ## Detection Patterns
 
-| Pattern | Trigger Thresholds | Severity |
-|---------|-------------------|---------|
-| **Layering / Spoofing** | cancel_ratio ≥ 70%, median TTC ≤ 2s, opposite-side fill, z ≥ 2.5σ | HIGH / CRITICAL |
-| **Wash Trading** | ≥ 3 matched BUY/SELL pairs, wash_fraction ≥ 20%, shared beneficial owner | MEDIUM / HIGH |
-| **Momentum Ignition** | ≥ 5 aggressive orders in 3 min, price move ≥ 0.5%, reversal within 10 min | MEDIUM / HIGH |
-| **Price Ramping** | ≥ 4 executions, monotonicity ≥ 80%, price drift ≥ 0.3%, z ≥ 2.0σ | MEDIUM / HIGH |
-| **Marking the Close** | session=CLOSE, price drift ≥ 0.3%, trader fraction ≥ 40%, z ≥ 3.0σ | HIGH |
+| Pattern                 | Trigger Thresholds                                                        | Severity        |
+| ----------------------- | ------------------------------------------------------------------------- | --------------- |
+| **Layering / Spoofing** | cancel_ratio ≥ 70%, median TTC ≤ 2s, opposite-side fill, z ≥ 2.5σ         | HIGH / CRITICAL |
+| **Wash Trading**        | ≥ 3 matched BUY/SELL pairs, wash_fraction ≥ 20%, shared beneficial owner  | MEDIUM / HIGH   |
+| **Momentum Ignition**   | ≥ 5 aggressive orders in 3 min, price move ≥ 0.5%, reversal within 10 min | MEDIUM / HIGH   |
+| **Price Ramping**       | ≥ 4 executions, monotonicity ≥ 80%, price drift ≥ 0.3%, z ≥ 2.0σ          | MEDIUM / HIGH   |
+| **Marking the Close**   | session=CLOSE, price drift ≥ 0.3%, trader fraction ≥ 40%, z ≥ 3.0σ        | HIGH            |
 
 All patterns compute z-scores against each trader's own 30-day baseline statistics,
 not a market-wide fixed threshold.
@@ -101,11 +132,11 @@ not a market-wide fixed threshold.
 **Prompt caching** on the ~2,000-token domain knowledge system prompt (all 5 patterns +
 false positive indicators) saves ~70% on input token costs for repeated triage calls.
 
-| Alert Severity | Triage Strategy | Jira | Slack |
-|---------------|----------------|------|-------|
-| CRITICAL / HIGH | One Claude call per alert | ✓ | ✓ (ESCALATE) |
-| MEDIUM / LOW | Batch up to 5 per call | ✓ (REVIEW) | — |
-| DISMISS | — | — | — |
+| Alert Severity  | Triage Strategy           | Jira       | Slack        |
+| --------------- | ------------------------- | ---------- | ------------ |
+| CRITICAL / HIGH | One Claude call per alert | ✓          | ✓ (ESCALATE) |
+| MEDIUM / LOW    | Batch up to 5 per call    | ✓ (REVIEW) | —            |
+| DISMISS         | —                         | —          | —            |
 
 **False positive discrimination:**
 - `account_type = market_maker` + `market_maker_registered = True` → raise FP probability by 0.25-0.35 on layering alerts
@@ -116,15 +147,15 @@ false positive indicators) saves ~70% on input token costs for repeated triage c
 
 ## API Endpoints
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/ingest` | Upload scenario CSV, run detection |
-| `GET` | `/alerts` | List alerts (filter by severity, pattern, triaged) |
-| `GET` | `/alerts/{id}` | Full alert + triage result |
-| `POST` | `/alerts/{id}/triage` | Triage single alert with Claude |
-| `GET` | `/watchlist` | Active enhanced-monitoring traders |
-| `POST` | `/demo/run` | Full pipeline on loaded data |
-| `GET` | `/metrics` | Token usage, cache hit rate, alert counts |
+| Method | Endpoint              | Description                                        |
+| ------ | --------------------- | -------------------------------------------------- |
+| `POST` | `/ingest`             | Upload scenario CSV, run detection                 |
+| `GET`  | `/alerts`             | List alerts (filter by severity, pattern, triaged) |
+| `GET`  | `/alerts/{id}`        | Full alert + triage result                         |
+| `POST` | `/alerts/{id}/triage` | Triage single alert with Claude                    |
+| `GET`  | `/watchlist`          | Active enhanced-monitoring traders                 |
+| `POST` | `/demo/run`           | Full pipeline on loaded data                       |
+| `GET`  | `/metrics`            | Token usage, cache hit rate, alert counts          |
 
 ---
 
@@ -174,16 +205,16 @@ hackathon3/
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | **Yes** | Claude API key |
-| `JIRA_BASE_URL` | No | e.g. `https://yourorg.atlassian.net` |
-| `JIRA_API_TOKEN` | No | Jira Cloud API token |
-| `JIRA_USER_EMAIL` | No | Account email for Jira auth |
-| `JIRA_PROJECT_KEY` | No | Default: `COMP` |
-| `JIRA_L2_ASSIGNEE_ACCOUNT_ID` | No | Jira account ID for L2 escalations |
-| `SLACK_WEBHOOK_URL` | No | Incoming webhook URL |
-| `SLACK_CHANNEL` | No | Default: `#compliance-alerts` |
+| Variable                      | Required | Description                          |
+| ----------------------------- | -------- | ------------------------------------ |
+| `ANTHROPIC_API_KEY`           | **Yes**  | Claude API key                       |
+| `JIRA_BASE_URL`               | No       | e.g. `https://yourorg.atlassian.net` |
+| `JIRA_API_TOKEN`              | No       | Jira Cloud API token                 |
+| `JIRA_USER_EMAIL`             | No       | Account email for Jira auth          |
+| `JIRA_PROJECT_KEY`            | No       | Default: `COMP`                      |
+| `JIRA_L2_ASSIGNEE_ACCOUNT_ID` | No       | Jira account ID for L2 escalations   |
+| `SLACK_WEBHOOK_URL`           | No       | Incoming webhook URL                 |
+| `SLACK_CHANNEL`               | No       | Default: `#compliance-alerts`        |
 
 Without Jira/Slack credentials, the system simulates both (prints to console) so the demo runs fully without external dependencies.
 

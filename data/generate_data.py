@@ -70,7 +70,7 @@ def simulate_gbm_path(s0: float, n_steps: int, dt: float = 1 / (252 * 390),
 # ---------------------------------------------------------------------------
 # Trader profile definitions
 # ---------------------------------------------------------------------------
-ANOMALY_TRADERS = {"T-4821", "T-6610", "T-8802"}
+ANOMALY_TRADERS = {"T-4821", "T-6610", "T-8802", "T-5599"}
 WASH_TRADERS = {"T-9033", "T-9034"}
 
 def build_trader_profiles() -> pd.DataFrame:
@@ -138,6 +138,17 @@ def build_trader_profiles() -> pd.DataFrame:
             "order_size_min": 1000,
             "order_size_max": 50000,
         })
+
+    # Marking-close anomaly trader
+    rows.append({
+        "trader_id": "T-5599",
+        "account_type": "prop_desk",
+        "market_maker_registered": False,
+        "beneficial_owner_id": None,
+        "cancel_rate": 0.15,
+        "order_size_min": 5000,
+        "order_size_max": 20000,
+    })
 
     return pd.DataFrame(rows)
 
@@ -539,6 +550,87 @@ def inject_price_ramping(trade_date: date, ref_prices: dict[str, float]) -> list
     return events
 
 
+def inject_marking_close(trade_date: date, ref_prices: dict[str, float]) -> list[dict]:
+    """Anomaly 5 — Marking the Close by T-5599 in AAPL, 15:55-16:00.
+
+    T-5599 dominates >60% of AAPL close-window volume with 8 aggressive BUY
+    executions, pushing price +0.55% in the final 5 minutes.  This gives a
+    z-score of 10σ vs market-wide close_volume_fraction baseline (~10%).
+    MarkingCloseDetector fires; Claude triages as ESCALATE (prop_desk, no
+    market-maker registration, no index-fund exemption).
+    """
+    tid = "T-5599"
+    instrument = "AAPL"
+    base_price = ref_prices[instrument]
+    events: list[dict] = []
+
+    close_start = datetime(
+        trade_date.year, trade_date.month, trade_date.day, 15, 55, 0
+    )
+    n_orders = 8
+    step_offsets = sorted(RNG.uniform(0, 270, n_orders).tolist())  # 270 s = 4m30s
+    current_price = base_price
+
+    for offset_sec in step_offsets:
+        ts = close_start + timedelta(seconds=offset_sec)
+        qty = float(int(RNG.integers(6000, 16001) / 1000) * 1000)
+        current_price = round(current_price * (1 + RNG.uniform(0.0006, 0.0012)), 2)
+        buy_pe = make_place_event(
+            trade_date, tid, instrument, "BUY", qty, current_price, "MARKET", ts,
+            is_aggressive=True,
+        )
+        exec_ts = ts + timedelta(milliseconds=float(RNG.uniform(50, 300)))
+        exec_evt = make_execute_event(trade_date, buy_pe, exec_ts, current_price)
+        events.append(buy_pe)
+        events.append(exec_evt)
+
+    return events
+
+
+def inject_market_maker_fp(trade_date: date, ref_prices: dict[str, float]) -> list[dict]:
+    """FP Scenario — Market maker T-0003 spikes cancel rate during a TSLA volatility
+    burst (10:28-10:30).  Cancel ratio of 87.5% with 300-600 ms TTC crosses the
+    layering thresholds but T-0003 is market_maker_registered=True.  Claude should
+    DISMISS this as legitimate quote management during a volatility event.
+    """
+    tid = "T-0003"
+    instrument = "TSLA"
+    base_price = ref_prices[instrument]
+    events: list[dict] = []
+
+    base_ts = datetime(trade_date.year, trade_date.month, trade_date.day, 10, 28, 0)
+    place_events: list[dict] = []
+
+    # 16 limit orders spread across both sides (quote management pattern)
+    for i in range(16):
+        offset_sec = float(RNG.uniform(0, 120))
+        ts = base_ts + timedelta(seconds=offset_sec)
+        side = "BUY" if i < 8 else "SELL"
+        qty = float(int(RNG.integers(500, 2001) / 100) * 100)
+        spread = RNG.uniform(-0.003, 0.003)
+        price = round(base_price * (1 + spread), 2)
+        pe = make_place_event(
+            trade_date, tid, instrument, side, qty, price, "LIMIT", ts
+        )
+        place_events.append(pe)
+        events.append(pe)
+
+    # Cancel 14 of 16 very quickly (300-600 ms) — market-maker quote withdrawal
+    for pe in place_events[:14]:
+        place_ts = datetime.fromisoformat(pe["timestamp"])
+        delay_ms = float(RNG.uniform(300, 600))
+        cancel_ts = place_ts + timedelta(milliseconds=delay_ms)
+        events.append(make_cancel_event(trade_date, pe, cancel_ts))
+
+    # Execute remaining 2 (legit fills)
+    for pe in place_events[14:]:
+        place_ts = datetime.fromisoformat(pe["timestamp"])
+        exec_ts = place_ts + timedelta(seconds=float(RNG.uniform(1, 4)))
+        events.append(make_execute_event(trade_date, pe, exec_ts))
+
+    return events
+
+
 # ---------------------------------------------------------------------------
 # Main generation logic
 # ---------------------------------------------------------------------------
@@ -608,7 +700,16 @@ def main():
     print("  Injecting Anomaly 4 — Price Ramping (T-8802, NVDA, 14:45-14:55)...")
     a4_events = inject_price_ramping(scenario_date, ref_prices)
 
-    all_scenario_events = normal_day_events + a1_events + a2_events + a3_events + a4_events
+    print("  Injecting Anomaly 5 — Marking the Close (T-5599, AAPL, 15:55-16:00)...")
+    a5_events = inject_marking_close(scenario_date, ref_prices)
+
+    print("  Injecting FP Scenario  — Market Maker False Positive (T-0003, TSLA, 10:28-10:30)...")
+    fp_events = inject_market_maker_fp(scenario_date, ref_prices)
+
+    all_scenario_events = (
+        normal_day_events + a1_events + a2_events + a3_events
+        + a4_events + a5_events + fp_events
+    )
 
     # -----------------------------------------------------------------------
     # Build DataFrames and write CSVs
@@ -658,7 +759,7 @@ def main():
     print("GENERATION COMPLETE")
     print("=" * 60)
     print(f"  trades_baseline.csv  : {len(baseline_df):>10,} events ({len(trading_days)} days)")
-    print(f"  trades_scenario.csv  : {len(scenario_df):>10,} events (1 day + 4 anomalies)")
+    print(f"  trades_scenario.csv  : {len(scenario_df):>10,} events (1 day + 5 anomalies + 1 FP)")
     print(f"  trader_profiles.csv  : {len(profiles_out):>10,} traders")
     print(f"  related_accounts.csv : {len(related_out):>10,} rows")
     print()
@@ -667,6 +768,8 @@ def main():
     print(f"  Wash Trading (T-9033+T-9034, MSFT)   : {len(a2_events):>5} events")
     print(f"  Momentum Ignition (T-6610, TSLA)     : {len(a3_events):>5} events")
     print(f"  Price Ramping (T-8802, NVDA)         : {len(a4_events):>5} events")
+    print(f"  Marking the Close (T-5599, AAPL)     : {len(a5_events):>5} events")
+    print(f"  Market Maker FP (T-0003, TSLA)       : {len(fp_events):>5} events")
     print(f"  Normal trading events (scenario day) : {len(normal_day_events):>5} events")
     print()
     print(f"Output directory: {DATA_DIR.resolve()}")

@@ -1,17 +1,31 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Response
 from pydantic import BaseModel
 from typing import Optional
 import io
 import pandas as pd
 import time
+from pathlib import Path
 
-from src.ingestion.schemas import Alert, TriageResult, SEVERITY_RANK
+from src.ingestion.schemas import Alert, TriageResult, FeedbackRecord, SEVERITY_RANK
 from src.ingestion.loader import load_events
 from src.detection.engine import DetectionEngine
 from src.triage.claude_client import ClaudeTriageClient
 from src.workflows.watchlist import WatchlistManager
 from src.workflows.jira_client import JiraClient
 from src.workflows.slack_client import SlackClient
+from src.workflows.report_generator import ComplianceReportGenerator
+
+REPORTS_DIR = Path(__file__).parent.parent.parent / "reports"
+REPORTS_DIR.mkdir(exist_ok=True)
+
+
+def _save_pdf(alert_id: str, pdf_bytes: bytes) -> str:
+    """Save PDF to reports/ and return the file path string."""
+    path = REPORTS_DIR / f"case_{alert_id}.pdf"
+    path.write_bytes(pdf_bytes)
+    print(f"  [PDF] Saved compliance case → {path}")
+    return str(path)
+
 
 router = APIRouter()
 
@@ -128,9 +142,68 @@ async def triage_alert(alert_id: str):
         result.slack_message_sent = slack.send_alert(alert, result, jira_key)
         AppState.watchlist.flag_trader(alert.trader_id, alert.pattern_type, alert_id)
 
-    return result.model_dump()
+        # 3rd workflow action: PDF compliance case
+        pdf_gen = ComplianceReportGenerator()
+        pdf_bytes = pdf_gen.generate_case_pdf(alert, result)
+        pdf_path = _save_pdf(alert_id, pdf_bytes) if pdf_bytes else None
+    else:
+        pdf_path = None
+
+    out = result.model_dump()
+    if pdf_path:
+        out["pdf_report_path"] = pdf_path
+        out["pdf_download_url"] = f"/report/case/{alert_id}"
+    return out
 
 
+# ─── Feedback (analyst correction + few-shot learning) ─────────────────────────
+
+class FeedbackBody(BaseModel):
+    correct: bool
+    analyst_note: str = ""
+    corrected_verdict: Optional[str] = None
+
+
+@router.post("/alerts/{alert_id}/feedback", summary="Submit analyst feedback on a triage verdict")
+async def submit_feedback(alert_id: str, body: FeedbackBody):
+    alert = next((a for a in AppState.alerts if a.alert_id == alert_id), None)
+    if not alert:
+        raise HTTPException(404, f"Alert {alert_id} not found")
+
+    triage = AppState.triage_results.get(alert_id)
+    if not triage:
+        raise HTTPException(400, f"Alert {alert_id} has not been triaged yet — triage it first")
+
+    feedback = FeedbackRecord(
+        alert_id=alert_id,
+        correct=body.correct,
+        analyst_note=body.analyst_note,
+        original_verdict=triage.verdict,
+        corrected_verdict=body.corrected_verdict,
+    )
+
+    # Store in feedback history on AppState
+    if not hasattr(AppState, "feedback_history"):
+        AppState.feedback_history = []
+    AppState.feedback_history.append(feedback)
+
+    # Inject into Claude client's few-shot store for future calls
+    claude = get_claude()
+    claude.add_feedback(feedback)
+
+    return {
+        "alert_id": alert_id,
+        "accepted": True,
+        "original_verdict": feedback.original_verdict,
+        "corrected_verdict": feedback.corrected_verdict,
+        "analyst_note": feedback.analyst_note,
+        "few_shot_examples_stored": len(claude.feedback_examples),
+        "message": (
+            "Feedback recorded. Claude will use this as a few-shot example in subsequent triage calls."
+            if not body.correct else
+            "Verdict confirmed correct. Stored as a positive few-shot example."
+        ),
+    }
 # ─── Watchlist ─────────────────────────────────────────────────────────────────
 
 @router.get("/watchlist", summary="Current enhanced-monitoring watchlist")
@@ -185,6 +258,13 @@ async def run_demo():
             result.slack_message_sent = slack.send_alert(alert, result, result.jira_ticket_id)
             log_entry["slack_sent"] = result.slack_message_sent
             AppState.watchlist.flag_trader(alert.trader_id, alert.pattern_type, alert.alert_id)
+            # 3rd workflow: PDF compliance case
+            pdf_gen = ComplianceReportGenerator()
+            pdf_bytes = pdf_gen.generate_case_pdf(alert, result)
+            if pdf_bytes:
+                pdf_path = _save_pdf(alert.alert_id, pdf_bytes)
+                log_entry["pdf_report_path"] = pdf_path
+                log_entry["pdf_download_url"] = f"/report/case/{alert.alert_id}"
 
         workflow_log.append(log_entry)
 
@@ -211,10 +291,17 @@ async def run_demo():
 async def get_metrics():
     claude = get_claude()
     m = claude.get_metrics()
+    triaged_count  = len(AppState.triage_results)
+    dismissed      = sum(1 for r in AppState.triage_results.values() if r.verdict == "DISMISS")
+    escalated      = sum(1 for r in AppState.triage_results.values() if r.verdict == "ESCALATE")
+    fp_suppression = round(100 * dismissed / max(triaged_count, 1), 1)
     return {
         "detection": {
             "total_alerts": len(AppState.alerts),
-            "triaged": len(AppState.triage_results),
+            "triaged": triaged_count,
+            "escalated": escalated,
+            "dismissed": dismissed,
+            "fp_suppression_rate_pct": fp_suppression,
             "by_severity": {
                 sev: sum(1 for a in AppState.alerts if a.severity == sev)
                 for sev in ("CRITICAL", "HIGH", "MEDIUM", "LOW")
@@ -229,6 +316,111 @@ async def get_metrics():
         "watchlist": {"active_traders": len(AppState.watchlist.get_flagged_set())},
     }
 
+# ─── Cross-alert Trader Investigation ──────────────────────────────────────────────
+
+@router.post("/traders/{trader_id}/investigate",
+             summary="Claude cross-alert investigation: are multiple alerts a coordinated scheme?")
+async def investigate_trader(trader_id: str):
+    trader_alerts = [a for a in AppState.alerts if a.trader_id == trader_id]
+    if not trader_alerts:
+        raise HTTPException(404, f"No alerts found for trader {trader_id}")
+
+    from src.ingestion.schemas import TraderProfile
+    profile = AppState.profiles.get(trader_id, TraderProfile(
+        trader_id=trader_id, account_type="unknown", market_maker_registered=False))
+    prior = AppState.watchlist.prior_alert_count(trader_id)
+    on_wl = AppState.watchlist.is_flagged(trader_id)
+
+    claude = get_claude()
+    result = claude.investigate_trader(
+        trader_id, trader_alerts, AppState.profiles, prior, on_wl
+    )
+    return result
+
+
+# ─── Daily Compliance Report ──────────────────────────────────────────────────
+
+@router.get("/report/daily",
+            summary="Claude-generated daily compliance officer narrative report")
+async def daily_report():
+    if not AppState.triage_results:
+        raise HTTPException(400, "No triage results yet — run /demo/run first")
+
+    from datetime import datetime
+    triaged_alerts  = [a for a in AppState.alerts if a.alert_id in AppState.triage_results]
+    triage_list     = [AppState.triage_results[a.alert_id] for a in triaged_alerts]
+    watchlist_status = AppState.watchlist.get_status()
+    date_str        = datetime.utcnow().strftime("%Y-%m-%d")
+
+    claude = get_claude()
+    report = claude.generate_daily_report(triaged_alerts, triage_list, watchlist_status, date_str)
+    return report
+
+
+# ─── Natural Language Query ───────────────────────────────────────────────────────
+
+class QueryBody(BaseModel):
+    question: str
+
+
+@router.post("/query",
+             summary="Natural language alert query — Claude parses question into filters")
+async def nl_query(body: QueryBody):
+    if not body.question.strip():
+        raise HTTPException(400, "question must not be empty")
+
+    claude  = get_claude()
+    filters = claude.natural_language_query(body.question)
+
+    # Apply returned filters to in-memory alerts
+    alerts = list(AppState.alerts)
+    if filters.get("severity"):
+        alerts = [a for a in alerts if a.severity == filters["severity"]]
+    if filters.get("pattern_type"):
+        alerts = [a for a in alerts if a.pattern_type == filters["pattern_type"]]
+    if filters.get("trader_id"):
+        alerts = [a for a in alerts if a.trader_id == filters["trader_id"]]
+    if filters.get("instrument"):
+        alerts = [a for a in alerts if a.instrument == filters["instrument"]]
+    if filters.get("verdict"):
+        alerts = [a for a in alerts
+                  if AppState.triage_results.get(a.alert_id, None) is not None
+                  and AppState.triage_results[a.alert_id].verdict == filters["verdict"]]
+    if filters.get("min_confidence") is not None:
+        alerts = [a for a in alerts
+                  if AppState.triage_results.get(a.alert_id) is not None
+                  and AppState.triage_results[a.alert_id].confidence >= filters["min_confidence"]]
+    if filters.get("max_fp_probability") is not None:
+        alerts = [a for a in alerts
+                  if AppState.triage_results.get(a.alert_id) is not None
+                  and AppState.triage_results[a.alert_id].false_positive_probability
+                  <= filters["max_fp_probability"]]
+
+    return {
+        "question": body.question,
+        "interpretation": filters.get("interpretation", ""),
+        "filters_applied": filters,
+        "result_count": len(alerts),
+        "alerts": [_alert_summary(a) for a in alerts],
+    }
+# ─── PDF Report Download ────────────────────────────────────────────────────────────
+
+@router.get("/report/case/{alert_id}",
+            summary="Download the PDF compliance case report for an ESCALATE alert",
+            response_class=Response)
+async def download_case_pdf(alert_id: str):
+    pdf_path = REPORTS_DIR / f"case_{alert_id}.pdf"
+    if not pdf_path.exists():
+        raise HTTPException(
+            404,
+            f"No PDF report found for {alert_id}. "
+            "Triage the alert first — PDFs are generated only for ESCALATE verdicts."
+        )
+    return Response(
+        content=pdf_path.read_bytes(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="case_{alert_id}.pdf"'},
+    )
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
 
@@ -54,6 +54,19 @@ class TriageResult(BaseModel):
     slack_message_sent: bool = False
     tokens_used: int = 0
     cache_hit: bool = False
+    call_cost_usd: float = 0.0        # USD cost for this specific Claude call
+    call_tokens_input: int = 0        # input tokens for this call
+    call_tokens_output: int = 0       # output tokens for this call
+    call_tokens_cache_read: int = 0   # cache-read tokens for this call
+
+
+class FeedbackRecord(BaseModel):
+    alert_id: str
+    correct: bool                     # True = analyst agrees with Claude verdict
+    analyst_note: str = ""
+    original_verdict: str
+    corrected_verdict: Optional[str] = None   # What verdict it SHOULD have been
+    recorded_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 SEVERITY_RANK = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}

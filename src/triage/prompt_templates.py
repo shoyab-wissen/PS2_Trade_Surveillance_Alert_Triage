@@ -110,3 +110,172 @@ def build_batch_user_prompt(alerts: list[Alert], profiles: dict, prior_counts: d
     batch_prompt = "\n\n".join(parts)
     batch_prompt += f"\n\nProvide a JSON ARRAY with exactly {len(alerts)} triage objects in the same order as the alerts above."
     return batch_prompt
+
+
+# ─── Cross-alert trader investigation ──────────────────────────────────────────
+
+def build_investigate_prompt(
+    trader_id: str,
+    alerts: list,
+    profiles: dict,
+    prior_count: int,
+    on_watchlist: bool,
+) -> str:
+    """
+    Build a prompt asking Claude to assess whether multiple alerts for the same
+    trader represent a coordinated manipulation scheme or independent events.
+    """
+    import json
+
+    profile = profiles.get(trader_id)
+    acct_type = profile.account_type if profile else "unknown"
+    mm_reg = profile.market_maker_registered if profile else False
+
+    alerts_block = ""
+    for i, alert in enumerate(alerts, 1):
+        alerts_block += (
+            f"\nAlert {i}: {alert.alert_id}\n"
+            f"  Pattern:  {alert.pattern_type}\n"
+            f"  Instrument: {alert.instrument}\n"
+            f"  Severity: {alert.severity}\n"
+            f"  Z-Score:  +{alert.z_score:.1f}σ\n"
+            f"  Detected: {alert.detected_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"  Evidence: {json.dumps(alert.evidence, indent=4)}\n"
+        )
+
+    return f"""CROSS-ALERT TRADER INVESTIGATION
+
+Trader: {trader_id}
+Account Type: {acct_type}
+Market Maker Registered: {mm_reg}
+On Watchlist: {on_watchlist}
+Prior alerts (last 90 days): {prior_count}
+Total alerts this session: {len(alerts)}
+
+ALERTS FOR THIS TRADER:
+{alerts_block}
+
+TASK: Assess whether these {len(alerts)} alert(s) represent:
+1. A COORDINATED MANIPULATION SCHEME (multiple patterns working together, e.g. price ramping followed by marking the close, or layering combined with momentum ignition)
+2. INDEPENDENT UNRELATED EVENTS (each alert is coincidental and unconnected)
+3. SYSTEMATIC BEHAVIOUR (same pattern repeated, suggesting habitual manipulation)
+
+Respond with JSON:
+{{
+  "scheme_type": "COORDINATED" | "INDEPENDENT" | "SYSTEMATIC" | "SINGLE",
+  "escalation_recommendation": "IMMEDIATE" | "ELEVATED" | "STANDARD" | "DISMISS",
+  "coordinated_confidence": <float 0.0-1.0>,
+  "cross_alert_rationale": "<3-5 sentences explaining the cross-alert pattern or lack thereof>",
+  "combined_risk_score": <float 0.0-1.0>,
+  "regulatory_flags": ["<flag1>", "<flag2>"],
+  "recommended_action": "<specific next step for L2 surveillance desk>"
+}}"""
+
+
+# ─── Daily compliance report ────────────────────────────────────────────────────
+
+def build_daily_report_prompt(
+    alerts: list,
+    triage_results: list,
+    watchlist_status: list,
+    date_str: str = "",
+) -> str:
+    """
+    Build a prompt asking Claude to synthesize all triage results into a
+    professional compliance officer narrative report.
+    """
+    import json
+
+    if not date_str:
+        from datetime import datetime
+        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+    escalated = [r for r in triage_results if r.verdict == "ESCALATE"]
+    reviewed   = [r for r in triage_results if r.verdict == "REVIEW"]
+    dismissed  = [r for r in triage_results if r.verdict == "DISMISS"]
+    fp_rate    = round(100 * len(dismissed) / max(len(triage_results), 1), 1)
+
+    # Build alert + verdict summary lines
+    summary_lines = []
+    alert_map = {a.alert_id: a for a in alerts}
+    for r in triage_results:
+        a = alert_map.get(r.alert_id)
+        if a:
+            summary_lines.append(
+                f"  [{r.verdict:8s}] {a.alert_id} | {a.pattern_type:22s} | "
+                f"{a.instrument} | {a.trader_id} | {r.confidence*100:.0f}% confidence"
+            )
+
+    watchlist_lines = [
+        f"  {e['trader_id']} — {e['reason']} — {e['hours_remaining']}h remaining"
+        for e in watchlist_status
+    ] or ["  (none)"]
+
+    return f"""DAILY SURVEILLANCE REPORT — {date_str}
+
+SUMMARY STATISTICS:
+  Total alerts processed: {len(alerts)}
+  ESCALATE: {len(escalated)}  |  REVIEW: {len(reviewed)}  |  DISMISS: {len(dismissed)}
+  False positive suppression rate: {fp_rate}%
+  Traders on enhanced monitoring: {len(watchlist_status)}
+
+ALERT VERDICTS:
+{chr(10).join(summary_lines) if summary_lines else "  (none)"}
+
+ACTIVE WATCHLIST:
+{chr(10).join(watchlist_lines)}
+
+TASK: Write a concise, professional Daily Surveillance Report suitable for the Head of
+Compliance. The report should:
+1. Open with a one-sentence executive summary of the day's risk level
+2. Describe each ESCALATE verdict in plain English with the key evidence
+3. Note any REVIEW items that need analyst follow-up
+4. Comment on false positive rate and what it means for detection calibration
+5. List traders on enhanced monitoring and why
+6. Close with recommended priority actions for the next trading day
+
+Write in a formal, factual tone. Use specific alert IDs, trader IDs, and instrument names.
+The report should be 300-500 words and ready to send directly to compliance leadership.
+
+Respond with JSON:
+{{
+  "report_date": "{date_str}",
+  "risk_level": "CRITICAL" | "HIGH" | "MEDIUM" | "LOW",
+  "executive_summary": "<one sentence>",
+  "full_report": "<the complete 300-500 word compliance officer narrative>",
+  "priority_actions": ["<action 1>", "<action 2>", "<action 3>"],
+  "next_day_focus": "<what the surveillance team should watch tomorrow>"
+}}"""
+
+
+# ─── Natural language query ─────────────────────────────────────────────────────
+
+def build_nl_query_prompt(question: str, available_patterns: list[str],
+                           available_severities: list[str]) -> str:
+    """
+    Build a prompt asking Claude to parse a natural language question into
+    structured filter parameters for the alerts database.
+    """
+    return f"""You are a compliance analyst assistant. Parse the following natural language
+question into structured query filters for the trade surveillance alert database.
+
+Available pattern types: {available_patterns}
+Available severity levels: {available_severities}
+Available verdicts: ["ESCALATE", "REVIEW", "DISMISS"]
+
+Question: "{question}"
+
+Respond ONLY with valid JSON:
+{{
+  "severity": <string or null>,
+  "pattern_type": <string or null>,
+  "verdict": <string or null>,
+  "min_confidence": <float 0.0-1.0 or null>,
+  "max_fp_probability": <float 0.0-1.0 or null>,
+  "trader_id": <string or null>,
+  "instrument": <string or null>,
+  "interpretation": "<one sentence explaining how you interpreted the question>"
+}}
+
+Use null for any filter not mentioned in the question.
+Match pattern_type and severity to the closest valid value from the available lists."""

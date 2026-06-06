@@ -29,7 +29,8 @@ from src.ingestion.schemas import Alert, TriageResult
 # Constants
 # ---------------------------------------------------------------------------
 
-ANOMALY_MAIN_TRADERS = {"T-4821", "T-9033", "T-9034", "T-6610", "T-8802"}
+ANOMALY_MAIN_TRADERS = {"T-4821", "T-9033", "T-9034", "T-6610", "T-8802", "T-5599"}
+FP_TRADERS = {"T-0003"}  # Market-maker false positive scenario
 
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
 STATIC_DIR = Path(__file__).parent.parent.parent / "static"
@@ -463,52 +464,118 @@ async def _generate_stream() -> AsyncGenerator[str, None]:
 
     await asyncio.sleep(1.5)
 
-    # ── Phase 6: FALSE POSITIVE ANALYSIS ─────────────────────────────────────
+    # ── Phase 5.5: MARKING THE CLOSE — T-5599 (15:55–16:00) ─────────────────
+    yield _sse(
+        {
+            "type": "fast_forward",
+            "from_time": "14:55",
+            "to_time": "15:55",
+            "skipped": "~3,100 normal events",
+        }
+    )
+    await asyncio.sleep(0.8)
+
     yield _sse(
         {
             "type": "phase",
-            "name": "FALSE POSITIVE ANALYSIS",
+            "name": "⚠ MARKING THE CLOSE DETECTED",
             "time": "15:55",
+            "normal": False,
+        }
+    )
+
+    marking_df = (
+        scenario_df[scenario_df["trader_id"] == "T-5599"]
+        .sort_values("timestamp")
+    )
+    for row in marking_df.itertuples(index=False):
+        yield _sse(_row_to_trade_dict(row, anomaly=True, anomaly_type="MARKING_CLOSE"))
+        total_events_shown += 1
+        await asyncio.sleep(0.22)
+
+    await asyncio.sleep(1.0)
+
+    async for event in _emit_detection_cycle("T-5599", "MARKING_CLOSE", "AAPL", is_fp=False):
+        yield event
+
+    await asyncio.sleep(1.5)
+
+    # ── Phase 6: FALSE POSITIVE — T-0003 Market Maker ──────────────────────
+    yield _sse(
+        {
+            "type": "phase",
+            "name": "✓ FALSE POSITIVE: MARKET MAKER IDENTIFIED",
+            "time": "10:30",
             "normal": True,
         }
     )
     await asyncio.sleep(0.5)
 
-    other_alerts = [a for a in alerts if a.trader_id not in ANOMALY_MAIN_TRADERS]
+    # T-0003 is a registered market maker whose high cancel rate triggered layering detector
+    mm_fp_df = (
+        scenario_df[scenario_df["trader_id"] == "T-0003"]
+        .sort_values("timestamp")
+        .head(20)
+    )
+    for row in mm_fp_df.itertuples(index=False):
+        yield _sse(_row_to_trade_dict(row, anomaly=True, anomaly_type="LAYERING"))
+        total_events_shown += 1
+        await asyncio.sleep(0.15)
 
-    fp_count = 0
-    for alert in other_alerts:
-        triage = triage_map.get(alert.alert_id)
+    await asyncio.sleep(0.6)
 
-        yield _sse(_alert_dict(alert))
+    fp_alert = _find_alert(alerts, "T-0003", "LAYERING")
+    if fp_alert:
+        yield _sse(_alert_dict(fp_alert))
         await asyncio.sleep(0.5)
+        yield _sse({"type": "triaging", "alert_id": fp_alert.alert_id, "trader": "T-0003"})
+        await asyncio.sleep(2.0)
+        triage = triage_map.get(fp_alert.alert_id)
+        if triage:
+            yield _sse(_verdict_dict(fp_alert, triage, is_fp=True))
+    else:
+        # Synthetic dismiss if detector didn't fire
+        yield _sse(
+            {
+                "type": "verdict",
+                "alert_id": "SYNTHETIC-MM-FP",
+                "verdict": "DISMISS",
+                "confidence": 0.84,
+                "false_positive_probability": 0.82,
+                "rationale": (
+                    "T-0003 is a registered market maker. The 87.5% cancel ratio reflects "
+                    "legitimate quote withdrawal during a TSLA volatility spike. "
+                    "No opposite-side profit was realised. Pattern is consistent with "
+                    "normal market-maker inventory risk management."
+                ),
+                "key_factors": [
+                    "market_maker_registered=True — cancel rates 70-90% are standard",
+                    "Cancel spike coincides with TSLA volatility burst",
+                    "No opposite-side execution at elevated price",
+                ],
+                "recommended_action": "Dismiss. Log for audit trail. No further action required.",
+                "is_fp": True,
+            }
+        )
 
+    await asyncio.sleep(1.5)
+
+    # Also emit any other borderline alerts from non-anomaly traders
+    other_alerts = [a for a in alerts
+                    if a.trader_id not in ANOMALY_MAIN_TRADERS
+                    and a.trader_id not in FP_TRADERS]
+    for alert in other_alerts[:2]:  # limit to 2 extra to keep demo tight
+        triage = triage_map.get(alert.alert_id)
+        yield _sse(_alert_dict(alert))
+        await asyncio.sleep(0.4)
         yield _sse({"type": "triaging", "alert_id": alert.alert_id, "trader": alert.trader_id})
         await asyncio.sleep(1.0)
-
-        if triage is not None:
+        if triage:
             yield _sse(_verdict_dict(alert, triage, is_fp=True))
-        else:
-            # Emit a synthetic dismiss for non-triaged other alerts
-            yield _sse(
-                {
-                    "type": "verdict",
-                    "alert_id": alert.alert_id,
-                    "verdict": "DISMISS",
-                    "confidence": 0.70,
-                    "false_positive_probability": 0.75,
-                    "rationale": "Pattern falls within normal trading variance for this trader type.",
-                    "key_factors": [
-                        f"z_score +{round(alert.z_score, 1)}sigma — below threshold for escalation",
-                        "No prior alerts in 30-day baseline window",
-                    ],
-                    "recommended_action": "Log and dismiss. Monitor for repeat occurrence.",
-                    "is_fp": True,
-                }
-            )
+        await asyncio.sleep(0.8)
 
-        fp_count += 1
-        await asyncio.sleep(1.0)
+    fp_count = 1 + len([a for a in alerts if a.trader_id not in ANOMALY_MAIN_TRADERS
+                        and a.trader_id not in FP_TRADERS])
 
     # ── Phase 7: MARKET CLOSE ─────────────────────────────────────────────────
     yield _sse({"type": "phase", "name": "MARKET CLOSE", "time": "16:00", "normal": True})
