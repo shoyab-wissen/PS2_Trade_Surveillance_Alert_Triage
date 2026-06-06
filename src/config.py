@@ -1,5 +1,16 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from functools import lru_cache
+from typing import Tuple, Type
+from pathlib import Path
+from dotenv import dotenv_values
+
+
+def _read_env_file() -> dict:
+    """Read .env from project root. Returns empty dict if not found."""
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        return {k: v for k, v in dotenv_values(env_path).items() if v is not None}
+    return {}
 
 
 class Settings(BaseSettings):
@@ -12,11 +23,15 @@ class Settings(BaseSettings):
     slack_webhook_url: str = ""
     slack_channel: str = "#compliance-alerts"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # Read .env directly so it overrides system env vars (e.g. Claude Code's own key)
+    env_vals = _read_env_file()
+    return Settings(**{k.lower(): v for k, v in env_vals.items()})

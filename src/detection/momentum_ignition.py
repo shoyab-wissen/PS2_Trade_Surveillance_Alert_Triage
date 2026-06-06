@@ -97,38 +97,14 @@ class MomentumIgnitionDetector:
                 burst_volume = burst_orders["quantity"].sum()
 
                 # ── Price movement check ──────────────────────────────────────
-                # Use market-wide executions to estimate price movement
-                instr_market = market_execs[market_execs["instrument"] == instrument]
-
-                # Price just before burst
-                pre_burst = instr_market[
-                    instr_market["timestamp"] < t_burst_start
-                ]
-                if pre_burst.empty:
+                # Compare burst execution price to reversal execution price
+                # (market-wide GBM doesn't move enough in minutes for the threshold)
+                burst_execs = burst_orders[burst_orders["event_type"] == "TRADE_EXECUTE"]
+                if burst_execs.empty:
                     continue
-                price_before = pre_burst.iloc[-1]["price"]
+                price_before = burst_execs["price"].mean()
 
-                # Price after burst (within price_check window)
-                t_price_check_end = t_burst_end + price_check_td
-                post_burst = instr_market[
-                    (instr_market["timestamp"] >= t_burst_end)
-                    & (instr_market["timestamp"] <= t_price_check_end)
-                ]
-                if post_burst.empty:
-                    continue
-                price_after = post_burst.iloc[-1]["price"]
-
-                if price_before == 0:
-                    continue
-
-                price_delta_pct = (price_after - price_before) / price_before
-
-                # Check direction matches burst side
-                expected_direction = 1 if burst_side == "BUY" else -1
-                if (price_delta_pct * expected_direction) < self.PRICE_MOVE_THRESHOLD:
-                    continue
-
-                # ── Reversal check ────────────────────────────────────────────
+                # Reversal check done first to get price_after
                 t_reversal_end = t_burst_end + reversal_td
                 trader_reversal = df[
                     (df["trader_id"] == trader_id)
@@ -140,11 +116,28 @@ class MomentumIgnitionDetector:
                 ]
                 if trader_reversal.empty:
                     continue
+                price_after = trader_reversal["price"].mean()
 
+                if price_before == 0:
+                    continue
+
+                price_delta_pct = (price_after - price_before) / price_before
+
+                # Check direction matches burst side
+                expected_direction = 1 if burst_side == "BUY" else -1
+                if (price_delta_pct * expected_direction) < self.PRICE_MOVE_THRESHOLD:
+                    continue
+
+                # reversal_qty already captured above alongside price_after
                 reversal_qty = trader_reversal["quantity"].sum()
 
                 # ── Z-score on burst volume ───────────────────────────────────
-                z = self.stats.z_score(trader_id, "daily_volume_mean", burst_volume)
+                # Scale burst volume to daily equivalent so it's comparable to
+                # the daily_volume_mean baseline (burst is only 3 minutes)
+                trading_minutes = 390.0
+                burst_minutes = self.BURST_WINDOW_SECONDS / 60.0
+                annualized_burst = burst_volume * (trading_minutes / burst_minutes)
+                z = self.stats.z_score(trader_id, "daily_volume_mean", annualized_burst)
                 if z < self.MIN_Z_SCORE:
                     continue
 
@@ -156,9 +149,7 @@ class MomentumIgnitionDetector:
 
                 seen_bursts.add(bucket)
 
-                event_ids = (
-                    list(burst_orders["event_id"]) + list(trader_reversal["event_id"])
-                )
+                event_ids = list(burst_orders["event_id"]) + list(trader_reversal["event_id"])
 
                 baseline_stat, _ = self.stats.get(trader_id)
 

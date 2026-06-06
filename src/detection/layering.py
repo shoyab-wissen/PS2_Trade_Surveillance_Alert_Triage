@@ -49,10 +49,11 @@ class LayeringDetector:
         df = df.dropna(subset=["timestamp"])
         df = df.sort_values("timestamp")
 
-        # Build a lookup: order_id -> timestamp for ORDER_PLACE events
+        # Build a lookup: event_id -> timestamp for ORDER_PLACE events
+        # (ORDER_CANCEL.related_order_id stores the place's event_id, not order_id)
         place_ts_map: dict[str, pd.Timestamp] = dict(
             zip(
-                df[df["event_type"] == "ORDER_PLACE"]["order_id"],
+                df[df["event_type"] == "ORDER_PLACE"]["event_id"],
                 df[df["event_type"] == "ORDER_PLACE"]["timestamp"],
             )
         )

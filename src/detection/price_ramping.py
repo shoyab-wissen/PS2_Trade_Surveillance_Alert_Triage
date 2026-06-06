@@ -119,7 +119,10 @@ class PriceRampingDetector:
                         continue
 
                     window_volume = window["quantity"].sum()
-                    z = self.stats.z_score(trader_id, "daily_volume_mean", window_volume)
+                    # Scale window volume to daily equivalent before comparing to baseline
+                    trading_minutes = 390.0
+                    annualized_vol = window_volume * (trading_minutes / float(self.WINDOW_MINUTES))
+                    z = self.stats.z_score(trader_id, "daily_volume_mean", annualized_vol)
                     if z < self.MIN_Z_SCORE:
                         continue
 
