@@ -612,7 +612,7 @@ class ClaudeTriageClient:
         try:
             response = self.client.messages.create(
                 model=self.MODEL,
-                max_tokens=600,
+                max_tokens=8096,
                 system=self._cached_system(),
                 messages=[{"role": "user", "content": user_prompt}],
             )
@@ -636,11 +636,124 @@ class ClaudeTriageClient:
             .rstrip("`")
             .strip()
         )
+        result = None
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
             m = re.search(r"\{.*\}", text, re.DOTALL)
-            result = json.loads(m.group()) if m else {}
+            if m:
+                raw = m.group()
+                try:
+                    result = json.loads(raw)
+                except json.JSONDecodeError:
+                    # Try truncating to last valid closing brace
+                    fixed = raw
+                    for _ in range(10):
+                        last_brace = fixed.rfind("}")
+                        if last_brace <= 0:
+                            break
+                        candidate = fixed[: last_brace + 1]
+                        try:
+                            result = json.loads(candidate)
+                            break
+                        except json.JSONDecodeError:
+                            fixed = fixed[:last_brace]
+
+                    # If still broken, try adding closing braces to repair
+                    if result is None:
+                        attempt = raw
+                        for _ in range(20):
+                            try:
+                                result = json.loads(attempt)
+                                break
+                            except json.JSONDecodeError as je:
+                                msg = str(je).lower()
+                                if "unterminated string" in msg:
+                                    attempt += '"'
+                                elif "expecting ',' or '}'" in msg or "expecting property name" in msg:
+                                    attempt += "}"
+                                elif "expecting ',' or ']'" in msg:
+                                    attempt += "]"
+                                elif "expecting value" in msg:
+                                    attempt += '""}'
+                                elif "expecting ':'" in msg:
+                                    attempt += '":""}'
+                                else:
+                                    attempt += "}"
+
+                    # Last resort: regex-extract top-level fields from broken JSON
+                    if result is None:
+                        print(f"  [Claude] investigate JSON parse failed, extracting fields via regex")
+                        result = {}
+                        # Extract string fields
+                        for key in ["scheme_type", "escalation_recommendation", "summary",
+                                     "rationale", "verdict", "recommended_action",
+                                     "cross_alert_rationale"]:
+                            fm = re.search(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+                            if fm:
+                                result[key] = fm.group(1).replace("\\n", "\n").replace('\\"', '"')
+                        # Extract numeric fields
+                        for key in ["confidence", "risk_score", "coordinated_confidence",
+                                     "combined_risk_score"]:
+                            fm = re.search(rf'"{key}"\s*:\s*([\d.]+)', raw)
+                            if fm:
+                                result[key] = float(fm.group(1))
+                        # Extract sections object (best effort)
+                        sm = re.search(r'"sections"\s*:\s*\{', raw)
+                        if sm:
+                            sections_raw = raw[sm.start():]
+                            # Try to parse sections by closing brace matching
+                            depth = 0
+                            end_pos = 0
+                            in_string = False
+                            escape_next = False
+                            for ci, ch in enumerate(sections_raw[sections_raw.index("{"):]):
+                                if escape_next:
+                                    escape_next = False
+                                    continue
+                                if ch == "\\":
+                                    escape_next = True
+                                    continue
+                                if ch == '"':
+                                    in_string = not in_string
+                                    continue
+                                if in_string:
+                                    continue
+                                if ch == "{":
+                                    depth += 1
+                                elif ch == "}":
+                                    depth -= 1
+                                    if depth == 0:
+                                        end_pos = ci + 1
+                                        break
+                            if end_pos > 0:
+                                sect_str = sections_raw[sections_raw.index("{"):sections_raw.index("{") + end_pos]
+                                try:
+                                    result["sections"] = json.loads(sect_str)
+                                except json.JSONDecodeError:
+                                    pass
+                        # Extract regulatory_flags array
+                        fm = re.search(r'"regulatory_flags"\s*:\s*\[(.*?)\]', raw, re.DOTALL)
+                        if fm:
+                            try:
+                                result["regulatory_flags"] = json.loads("[" + fm.group(1) + "]")
+                            except json.JSONDecodeError:
+                                result["regulatory_flags"] = []
+                        # Ensure minimum required fields
+                        if not result.get("summary"):
+                            result["summary"] = result.get("rationale", result.get("cross_alert_rationale", text[:500]))
+                        if not result.get("rationale"):
+                            result["rationale"] = result.get("summary", text[:500])
+
+        if result is None:
+            print(f"  [Claude] investigate JSON parse completely failed, using text fallback")
+            result = {
+                "summary": text[:500],
+                "rationale": text[:500],
+                "confidence": 0.65,
+                "risk_score": 0.65,
+                "verdict": "REVIEW",
+            }
 
         result["trader_id"] = trader_id
         result["alerts_analysed"] = len(alerts)
@@ -703,7 +816,7 @@ class ClaudeTriageClient:
         try:
             response = self.client.messages.create(
                 model=self.MODEL,
-                max_tokens=1200,
+                max_tokens=8096,
                 system=self._cached_system(),
                 messages=[{"role": "user", "content": user_prompt}],
             )
@@ -727,11 +840,43 @@ class ClaudeTriageClient:
             .rstrip("`")
             .strip()
         )
+        result = None
         try:
             result = json.loads(text)
         except json.JSONDecodeError:
             m = re.search(r"\{.*\}", text, re.DOTALL)
-            result = json.loads(m.group()) if m else {"full_report": text}
+            if m:
+                raw = m.group()
+                try:
+                    result = json.loads(raw)
+                except json.JSONDecodeError:
+                    # Progressive truncation like investigate_trader
+                    fixed = raw
+                    for _ in range(5):
+                        last_brace = fixed.rfind("}")
+                        if last_brace <= 0:
+                            break
+                        candidate = fixed[: last_brace + 1]
+                        try:
+                            result = json.loads(candidate)
+                            break
+                        except json.JSONDecodeError:
+                            fixed = fixed[:last_brace]
+        if result is None:
+            print(f"  [Claude] daily_report JSON parse failed, using text fallback")
+            result = {"full_report": text}
+
+        # If result ended up as {"full_report": "<json-string>"}, try to unwrap it
+        if (
+            list(result.keys()) == ["full_report"]
+            and isinstance(result.get("full_report"), str)
+        ):
+            try:
+                inner = json.loads(result["full_report"])
+                if isinstance(inner, dict):
+                    result = inner
+            except (json.JSONDecodeError, ValueError):
+                pass
 
         return result
 

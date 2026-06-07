@@ -1,0 +1,90 @@
+{
+  "report_id": "DET-20260607-001",
+  "timestamp": "2026-06-07T14:30:00Z",
+  "analysis_period": {
+    "start": "2026-06-01T09:30:00Z",
+    "end": "2026-06-07T16:00:00Z",
+    "trades_analyzed": 15000
+  },
+  "summary": {
+    "total_detections": 12,
+    "critical": 2,
+    "high": 4,
+    "medium": 6,
+    "traders_flagged": 8
+  },
+  "detections": [
+    {
+      "detection_id": "DET-001",
+      "trader_id": "T12345",
+      "manipulation_type": "layering",
+      "confidence": 0.94,
+      "severity": "critical",
+      "detected_time": "2026-06-07T14:15:30Z",
+      "evidence": {
+        "order_to_trade_ratio": 18.5,
+        "peer_group_median": 2.1,
+        "z_score": 8.2,
+        "p_value": 0.00001,
+        "cancellation_rate": 0.89,
+        "order_lifetime_seconds": 12.4,
+        "pattern_repetitions": 23
+      },
+      "affected_security": "AAPL",
+      "affected_trades_count": 47,
+      "estimated_market_impact": "$150,000",
+      "recommended_action": "Escalate to compliance review",
+      "supporting_doc": "references/detection-patterns.md#pattern-layering"
+    },
+    {
+      "detection_id": "DET-002",
+      "trader_id": "T67890",
+      "manipulation_type": "wash_trading",
+      "confidence": 0.87,
+      "severity": "high",
+      "detected_time": "2026-06-06T11:45:00Z",
+      "evidence": {
+        "matched_pairs": 14,
+        "price_variance": 0.02,
+        "timing_variance_ms": 150,
+        "party_relationship": "Shared corporate entity",
+        "beneficial_ownership_change": false
+      },
+      "affected_security": "MSFT",
+      "affected_trades_count": 28,
+      "estimated_volume_false": 140000,
+      "recommended_action": "Investigate party relationship",
+      "supporting_doc": "references/detection-patterns.md#pattern-wash-trading"
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": 1,
+      "action": "Suspend trading for traders T12345 and T23456",
+      "rationale": "Critical layering patterns detected"
+    },
+    {
+      "priority": 2,
+      "action": "Investigate entity relationship between traders T67890 and T01234",
+      "rationale": "Wash trading with coordinated timing"
+    },
+    {
+      "priority": 3,
+      "action": "Increase monitoring of trader T99999",
+      "rationale": "Multiple medium-confidence detections showing pattern evolution"
+    }
+  ],
+  "methodology": {
+    "detection_engine": "market-manipulation-detection v2.1",
+    "confidence_threshold_applied": 0.70,
+    "patterns_checked": ["layering", "wash_trading", "momentum_ignition", "price_ramping", "marking_close"],
+    "false_positive_filtering": "Enabled",
+    "peer_group_comparison": "Enabled"
+  },
+  "audit_trail": {
+    "analyst": "claude-detection-engine",
+    "review_status": "awaiting_compliance_review",
+    "escalation_timestamp": null,
+    "notes": "Report ready for L2 compliance triage"
+  }
+}

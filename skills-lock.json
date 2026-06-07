@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "create-agent-skills": {
+      "source": "glittercowboy/taches-cc-resources",
+      "sourceType": "github",
+      "skillPath": "skills/create-agent-skills/SKILL.md",
+      "computedHash": "729b1c44016ba533bf48fb1ca988038355bbd2d0b1880c708e5872f4ef16dcb4"
+    },
     "grill-me-codex": {
       "source": "chaseai-yt/grill-me-codex",
       "sourceType": "github",

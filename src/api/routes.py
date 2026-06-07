@@ -38,6 +38,8 @@ class AppState:
     watchlist: Optional[WatchlistManager] = None
     alerts: list[Alert] = []
     triage_results: dict[str, TriageResult] = {}
+    simulation_runs: list[dict] = []  # stored simulation run results
+    feedback_history: list = []
 
 _claude_client: Optional[ClaudeTriageClient] = None
 
@@ -332,9 +334,28 @@ async def investigate_trader(trader_id: str):
     on_wl = AppState.watchlist.is_flagged(trader_id)
 
     claude = get_claude()
-    result = claude.investigate_trader(
-        trader_id, trader_alerts, AppState.profiles, prior, on_wl
-    )
+    try:
+        result = claude.investigate_trader(
+            trader_id, trader_alerts, AppState.profiles, prior, on_wl
+        )
+    except Exception as e:
+        print(f"  [Investigate] Error for {trader_id}: {e}")
+        result = {
+            "trader_id": trader_id,
+            "alerts_analysed": len(trader_alerts),
+            "summary": f"Investigation encountered an error: {str(e)}",
+            "rationale": f"Error during analysis: {str(e)}",
+            "confidence": 0.5,
+            "risk_score": 0.5,
+            "coordinated_confidence": 0.5,
+            "combined_risk_score": 0.5,
+            "scheme_type": "REVIEW",
+            "escalation_recommendation": "STANDARD",
+            "cross_alert_rationale": f"Error: {str(e)}",
+            "regulatory_flags": [],
+            "recommended_action": "Manual review required due to analysis error.",
+            "sections": {},
+        }
     return result
 
 
@@ -436,4 +457,49 @@ def _alert_summary(alert: Alert) -> dict:
         "detected_at": alert.detected_at.isoformat(),
         "triaged": triage is not None,
         "verdict": triage.verdict if triage else None,
+    }
+
+
+# ─── Dashboard API ────────────────────────────────────────────────────────────
+
+@router.post("/api/dashboard/runs",
+             summary="Store a simulation run result")
+async def store_run(run_data: dict):
+    from datetime import datetime
+    run_data["timestamp"] = run_data.get("timestamp", datetime.utcnow().isoformat())
+    run_data["run_id"] = len(AppState.simulation_runs) + 1
+    AppState.simulation_runs.append(run_data)
+    return {"status": "stored", "run_id": run_data["run_id"]}
+
+
+@router.get("/api/dashboard/runs",
+            summary="List all simulation runs")
+async def list_runs():
+    return AppState.simulation_runs
+
+
+@router.get("/api/dashboard/stats",
+            summary="Aggregated dashboard statistics")
+async def dashboard_stats():
+    runs = AppState.simulation_runs
+    total_runs = len(runs)
+    total_alerts = sum(r.get("total_alerts", 0) for r in runs)
+    total_escalated = sum(r.get("escalated", 0) for r in runs)
+    total_reviewed = sum(r.get("reviewed", 0) for r in runs)
+    total_dismissed = sum(r.get("dismissed", 0) for r in runs)
+    total_fp = sum(r.get("false_positives_intercepted", 0) for r in runs)
+    total_watchlisted = sum(r.get("traders_watchlisted", 0) for r in runs)
+    total_cost = sum(r.get("cost_usd", 0) for r in runs)
+    total_api_calls = sum(r.get("api_calls", 0) for r in runs)
+
+    return {
+        "total_runs": total_runs,
+        "total_alerts": total_alerts,
+        "total_escalated": total_escalated,
+        "total_reviewed": total_reviewed,
+        "total_dismissed": total_dismissed,
+        "total_fp": total_fp,
+        "total_watchlisted": total_watchlisted,
+        "total_cost": round(total_cost, 6),
+        "total_api_calls": total_api_calls,
     }

@@ -163,18 +163,52 @@ Total alerts this session: {len(alerts)}
 ALERTS FOR THIS TRADER:
 {alerts_block}
 
-TASK: Assess whether these {len(alerts)} alert(s) represent:
-1. A COORDINATED MANIPULATION SCHEME (multiple patterns working together, e.g. price ramping followed by marking the close, or layering combined with momentum ignition)
-2. INDEPENDENT UNRELATED EVENTS (each alert is coincidental and unconnected)
-3. SYSTEMATIC BEHAVIOUR (same pattern repeated, suggesting habitual manipulation)
+TASK: Provide a MULTI-SECTION deep-dive investigation of this trader. Assess whether these {len(alerts)} alert(s) represent:
+1. A COORDINATED MANIPULATION SCHEME (multiple patterns working together)
+2. INDEPENDENT UNRELATED EVENTS (coincidental and unconnected)
+3. SYSTEMATIC BEHAVIOUR (same pattern repeated, habitual manipulation)
 
-Respond with JSON:
+Respond with JSON containing these assessment sections:
 {{
   "scheme_type": "COORDINATED" | "INDEPENDENT" | "SYSTEMATIC" | "SINGLE",
   "escalation_recommendation": "IMMEDIATE" | "ELEVATED" | "STANDARD" | "DISMISS",
   "coordinated_confidence": <float 0.0-1.0>,
-  "cross_alert_rationale": "<3-5 sentences explaining the cross-alert pattern or lack thereof>",
   "combined_risk_score": <float 0.0-1.0>,
+
+  "sections": {{
+    "cross_alert_analysis": {{
+      "title": "Cross-Alert Correlation Analysis",
+      "finding": "<2-3 sentences: how the alerts relate to each other, timing correlations, instrument overlaps>",
+      "risk_level": "HIGH" | "MEDIUM" | "LOW"
+    }},
+    "behavioral_assessment": {{
+      "title": "Behavioral Pattern Assessment",
+      "finding": "<2-3 sentences: what the trading behavior reveals about intent - order-to-cancel ratios, directional bias, timing clusters>",
+      "risk_level": "HIGH" | "MEDIUM" | "LOW"
+    }},
+    "market_impact": {{
+      "title": "Market Impact Analysis",
+      "finding": "<2-3 sentences: observed or potential impact on price discovery, liquidity, other market participants>",
+      "risk_level": "HIGH" | "MEDIUM" | "LOW"
+    }},
+    "regulatory_assessment": {{
+      "title": "Regulatory Compliance Assessment",
+      "finding": "<2-3 sentences: which regulations may be violated (MAR Art.12, Dodd-Frank, MiFID II), reporting obligations>",
+      "flags": ["<specific regulatory flag>"],
+      "risk_level": "HIGH" | "MEDIUM" | "LOW"
+    }},
+    "historical_context": {{
+      "title": "Historical Context & Recurrence",
+      "finding": "<2-3 sentences: significance of prior alert count, watchlist status, whether this is escalating behavior>",
+      "risk_level": "HIGH" | "MEDIUM" | "LOW"
+    }}
+  }},
+
+  "risk_factors": [
+    {{"factor": "<factor name>", "score": <int 0-100>, "detail": "<short explanation>"}}
+  ],
+
+  "cross_alert_rationale": "<3-5 sentence executive summary>",
   "regulatory_flags": ["<flag1>", "<flag2>"],
   "recommended_action": "<specific next step for L2 surveillance desk>"
 }}"""

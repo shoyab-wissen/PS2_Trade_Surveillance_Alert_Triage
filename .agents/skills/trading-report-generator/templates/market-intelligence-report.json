@@ -1,0 +1,168 @@
+{
+  "report_type": "Market Intelligence Summary",
+  "reporting_period": "2026-05-08 to 2026-06-07",
+  "created_date": "2026-06-07",
+  "classification": "Internal Use - Compliance Sensitive",
+  "key_metrics": {
+    "total_detections": 47,
+    "period_over_period_change": "+18%",
+    "traders_flagged": 12,
+    "affected_securities": 8,
+    "total_estimated_market_impact": "$2.3M"
+  },
+  "trend_analysis": {
+    "layering": {
+      "current_month": 18,
+      "previous_month": 15,
+      "trend": "increasing",
+      "percent_change": "+20%",
+      "risk_level": "high"
+    },
+    "wash_trading": {
+      "current_month": 12,
+      "previous_month": 10,
+      "trend": "increasing",
+      "percent_change": "+20%",
+      "risk_level": "high"
+    },
+    "momentum_ignition": {
+      "current_month": 8,
+      "previous_month": 9,
+      "trend": "decreasing",
+      "percent_change": "-11%",
+      "risk_level": "medium"
+    },
+    "price_ramping": {
+      "current_month": 5,
+      "previous_month": 4,
+      "trend": "stable",
+      "percent_change": "+25%",
+      "risk_level": "medium"
+    },
+    "marking_close": {
+      "current_month": 4,
+      "previous_month": 2,
+      "trend": "increasing",
+      "percent_change": "+100%",
+      "risk_level": "high"
+    }
+  },
+  "top_traders_by_activity": [
+    {
+      "rank": 1,
+      "trader_id": "T99999",
+      "detection_count": 7,
+      "pattern_types": ["layering", "wash_trading"],
+      "estimated_impact": "$450K",
+      "risk_profile": "Sophisticated, coordinated"
+    },
+    {
+      "rank": 2,
+      "trader_id": "T12345",
+      "detection_count": 6,
+      "pattern_types": ["layering", "momentum_ignition"],
+      "estimated_impact": "$320K",
+      "risk_profile": "Aggressive, high-frequency"
+    },
+    {
+      "rank": 3,
+      "trader_id": "T67890",
+      "detection_count": 5,
+      "pattern_types": ["wash_trading"],
+      "estimated_impact": "$280K",
+      "risk_profile": "Coordinated with peers"
+    }
+  ],
+  "most_targeted_securities": [
+    {
+      "security": "AAPL",
+      "manipulation_attempts": 12,
+      "common_pattern": "layering",
+      "peak_times": "Market open, 15:00 ET"
+    },
+    {
+      "security": "MSFT",
+      "manipulation_attempts": 10,
+      "common_pattern": "wash_trading",
+      "peak_times": "Throughout day"
+    },
+    {
+      "security": "TSLA",
+      "manipulation_attempts": 8,
+      "common_pattern": "momentum_ignition",
+      "peak_times": "High volatility periods"
+    }
+  ],
+  "temporal_patterns": {
+    "peak_hours": ["09:30-10:00", "15:45-16:00"],
+    "low_hours": ["11:00-13:00"],
+    "peak_days": ["Monday", "Friday"],
+    "correlation_with_events": "Increased activity around earnings, Fed announcements"
+  },
+  "trader_networks": [
+    {
+      "network_id": "NET-001",
+      "traders": ["T99999", "T88888", "T77777"],
+      "coordination_evidence": "Simultaneous wash trades, coordinated timing",
+      "sophistication_level": "Highly sophisticated",
+      "estimated_combined_impact": "$650K"
+    },
+    {
+      "network_id": "NET-002",
+      "traders": ["T12345", "T11111"],
+      "coordination_evidence": "Sequential layering in same securities",
+      "sophistication_level": "Moderately sophisticated",
+      "estimated_combined_impact": "$380K"
+    }
+  ],
+  "strategic_recommendations": [
+    {
+      "priority": 1,
+      "action": "Escalate NET-001 traders to regulatory investigation",
+      "rationale": "Highly sophisticated coordinated network with significant market impact",
+      "timeline": "Within 48 hours",
+      "expected_outcome": "Regulatory referral"
+    },
+    {
+      "priority": 2,
+      "action": "Implement enhanced surveillance for AAPL, MSFT, TSLA during peak hours",
+      "rationale": "These securities show concentrated manipulation activity",
+      "timeline": "Implement within 1 week",
+      "expected_outcome": "Early detection of future attempts"
+    },
+    {
+      "priority": 3,
+      "action": "Increase monitoring of traders T99999, T12345, T67890",
+      "rationale": "Top 3 most active manipulators with escalating patterns",
+      "timeline": "Ongoing enhanced monitoring",
+      "expected_outcome": "Prevent future market abuse"
+    },
+    {
+      "priority": 4,
+      "action": "Review order flow controls for market-close period",
+      "rationale": "Marking-close detections up 100% month-over-month",
+      "timeline": "Analysis within 2 weeks, implementation within 1 month",
+      "expected_outcome": "Reduce close manipulation by 50%"
+    }
+  ],
+  "emerging_threats": [
+    {
+      "threat": "Coordinated wash trading network (NET-001)",
+      "confidence": "High",
+      "trend": "Increasing sophistication",
+      "recommended_response": "Regulatory escalation"
+    },
+    {
+      "threat": "End-of-day price manipulation",
+      "confidence": "High",
+      "trend": "Rapidly increasing (+100%)",
+      "recommended_response": "Enhanced surveillance + controls"
+    }
+  ],
+  "effectiveness_metrics": {
+    "detection_coverage": "95% of suspected manipulations detected",
+    "false_positive_rate": "8% (industry benchmark: 10-15%)",
+    "average_time_to_detection": "2.3 minutes",
+    "investigation_close_rate": "92% within 30 days"
+  }
+}

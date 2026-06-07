@@ -1,0 +1,101 @@
+{
+  "summary_id": "TRIAGE-20260607-001",
+  "timestamp": "2026-06-07T15:00:00Z",
+  "input_detections": 12,
+  "classifications": [
+    {
+      "detection_id": "DET-001",
+      "trader_id": "T12345",
+      "manipulation_type": "layering",
+      "confidence": 0.94,
+      "severity": "critical",
+      "action": "immediate_escalation",
+      "jira_key": "KAN-201",
+      "slack_channel": "#compliance-escalation",
+      "sla_hours": 1,
+      "reason": "Z-score 8.2 (>>peer group), high pattern repetition",
+      "modifiers_applied": [
+        "trader_prior_violations: +0.05",
+        "high_estimated_impact: +0.10"
+      ]
+    },
+    {
+      "detection_id": "DET-002",
+      "trader_id": "T67890",
+      "manipulation_type": "wash_trading",
+      "confidence": 0.87,
+      "severity": "high",
+      "action": "l2_investigation",
+      "jira_key": "KAN-202",
+      "slack_channel": "#compliance-alerts",
+      "sla_hours": 24,
+      "reason": "Clear party relationship + suspicious timing + no profit",
+      "modifiers_applied": []
+    },
+    {
+      "detection_id": "DET-003",
+      "trader_id": "T99999",
+      "manipulation_type": "momentum_ignition",
+      "confidence": 0.62,
+      "severity": "medium",
+      "action": "investigation_queue",
+      "jira_key": null,
+      "slack_channel": null,
+      "sla_days": 5,
+      "reason": "Moderate impact ratio, but timing consistent with algorithm response",
+      "modifiers_applied": [
+        "market_volatility_event: -0.15"
+      ]
+    }
+  ],
+  "summary_by_severity": {
+    "critical": {
+      "count": 2,
+      "traders": ["T12345", "T54321"],
+      "action": "ESCALATE IMMEDIATELY"
+    },
+    "high": {
+      "count": 4,
+      "traders": ["T67890", "T11111", "T22222", "T33333"],
+      "action": "OPEN INVESTIGATIONS"
+    },
+    "medium": {
+      "count": 6,
+      "traders": ["T99999", "T88888", "T77777", "T66666", "T55555", "T44444"],
+      "action": "QUEUE FOR REVIEW"
+    }
+  },
+  "next_steps": [
+    {
+      "priority": 1,
+      "action": "Create and escalate KAN-201 (T12345 layering)",
+      "owner": "compliance-lead",
+      "deadline": "within 1 hour"
+    },
+    {
+      "priority": 2,
+      "action": "Send critical Slack alert to #compliance-escalation",
+      "owner": "triage-system",
+      "deadline": "immediate"
+    },
+    {
+      "priority": 3,
+      "action": "Assign KAN-202 KAN-203 KAN-204 KAN-205 for investigation",
+      "owner": "compliance-lead",
+      "deadline": "within 4 hours"
+    },
+    {
+      "priority": 4,
+      "action": "Add medium-confidence traders to monitoring watchlist",
+      "owner": "watchlist-manager",
+      "deadline": "within 24 hours"
+    }
+  ],
+  "audit_trail": {
+    "triage_timestamp": "2026-06-07T15:00:00Z",
+    "input_source": "detection-report.json",
+    "triage_agent": "compliance-triage-escalation",
+    "status": "awaiting_escalation_execution",
+    "decisions_locked": true
+  }
+}
