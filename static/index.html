@@ -286,10 +286,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
 
 /* ═══ PRICE CHART ══════════════════════════════════════════════════════ */
 #chart-strip{
-  height:88px;border-bottom:1px solid var(--border);background:var(--surface);
+  height:120px;border-bottom:1px solid var(--border);background:var(--surface);
   padding:2px 12px 2px 12px;flex-shrink:0;position:relative;
 }
-#chart-strip canvas{width:100%!important;height:100%!important}
+#chart-strip canvas{display:block}
 .chart-label{position:absolute;top:3px;left:14px;font-size:8px;color:var(--text-dim);
   letter-spacing:2px;text-transform:uppercase;font-weight:800;z-index:2}
 
@@ -397,7 +397,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
     <div class="ov-step" id="step-1"><div class="dot"></div>Loading 442,903 baseline events</div>
     <div class="ov-step" id="step-2"><div class="dot"></div>Building per-trader 30-day statistics</div>
     <div class="ov-step" id="step-3"><div class="dot"></div>Running 5-pattern detection engine</div>
-    <div class="ov-step" id="step-4"><div class="dot"></div>Triaging alerts with Claude AI</div>
+    <div class="ov-step" id="step-4"><div class="dot"></div>Preparing real-time triage</div>
   </div>
 </div>
 
@@ -444,7 +444,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
 
 <!-- ──────────────── PRICE CHART ──────────────── -->
 <div id="chart-strip">
-  <span class="chart-label">▸ INSTRUMENT PRICES · LIVE</span>
+  <span class="chart-label">▸ INSTRUMENT PRICE CHANGE (%) · LIVE</span>
   <canvas id="priceChart"></canvas>
 </div>
 
@@ -510,17 +510,17 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
 
 <!-- ──────────────── METRICS BAR ──────────────── -->
 <div id="metrics-bar">
-  <div class="m-item"><span class="m-label">API CALLS</span><span class="m-val blue" id="m-calls">—</span></div>
+  <div class="m-item"><span class="m-label">API CALLS</span><span class="m-val blue" id="m-calls">0</span></div>
   <div class="m-sep"></div>
-  <div class="m-item"><span class="m-label">INPUT TOK</span><span class="m-val" id="m-in">—</span></div>
-  <div class="m-item"><span class="m-label">OUTPUT TOK</span><span class="m-val" id="m-out">—</span></div>
-  <div class="m-item"><span class="m-label">CACHE TOK</span><span class="m-val cyan" id="m-cache">—</span></div>
+  <div class="m-item"><span class="m-label">INPUT TOK</span><span class="m-val" id="m-in">0</span></div>
+  <div class="m-item"><span class="m-label">OUTPUT TOK</span><span class="m-val" id="m-out">0</span></div>
+  <div class="m-item"><span class="m-label">CACHE TOK</span><span class="m-val cyan" id="m-cache">0</span></div>
   <div class="m-sep"></div>
-  <div class="m-item"><span class="m-label">CACHE HIT</span><span class="m-val green" id="m-hit">—</span></div>
-  <div class="m-item"><span class="m-label">COST</span><span class="m-val orange" id="m-cost">—</span></div>
-  <div class="m-item"><span class="m-label">SAVED</span><span class="m-val green" id="m-saved">—</span></div>
+  <div class="m-item"><span class="m-label">CACHE HIT</span><span class="m-val green" id="m-hit">0%</span></div>
+  <div class="m-item"><span class="m-label">COST</span><span class="m-val orange" id="m-cost">$0.0000</span></div>
+  <div class="m-item"><span class="m-label">SAVED</span><span class="m-val green" id="m-saved">$0.0000</span></div>
   <div class="m-sep"></div>
-  <div class="m-item"><span class="m-label">FP SUPPRESSION</span><span class="m-val purple" id="m-fp">—</span></div>
+  <div class="m-item"><span class="m-label">FP SUPPRESSION</span><span class="m-val purple" id="m-fp">0%</span></div>
 </div>
 
 <!-- ──────────────── MODAL ──────────────── -->
@@ -784,6 +784,26 @@ function onVerdict(d){
   scrollBot($('verdicts'));
 }
 
+function onWorkflow(d){
+  if(d.action==='jira_created' && d.ticket){
+    const card=$('vc-'+d.alert_id);
+    if(card){
+      const badge=document.createElement('div');
+      badge.className='fb-row';
+      badge.style.cssText='gap:6px;margin-top:4px';
+      badge.innerHTML=`<a class="dl-btn" href="https://wissen-hackathon.atlassian.net/browse/${esc(d.ticket)}" target="_blank" style="background:#1a3a6e;border-color:#2962ff">🎫 ${esc(d.ticket)}</a>`;
+      card.appendChild(badge);
+    }
+    /* also show in the trade feed */
+    const el=document.createElement('div');
+    el.className='trade-row';
+    el.style.cssText='border-left:3px solid var(--blue);color:var(--blue)';
+    el.innerHTML=`<span style="font-weight:600">JIRA</span> <span>${esc(d.ticket)} created for ${esc(d.alert_id)}</span>`;
+    $('trades').appendChild(el);
+    scrollBot($('trades'));
+  }
+}
+
 function onWatchlist(d){
   ST.wl++; bump('s-wl',ST.wl);
   $('wl-sec').style.display='block';
@@ -797,6 +817,17 @@ function onWatchlist(d){
     `<div class="wl-hrs">${d.hours}h enhanced monitoring</div>`;
   $('wl-rows').appendChild(row);
   scrollBot($('verdicts'));
+}
+
+function onMetricsUpdate(d){
+  $('m-calls').textContent=d.api_calls;
+  $('m-in').textContent=(d.input_tokens||0).toLocaleString();
+  $('m-out').textContent=(d.output_tokens||0).toLocaleString();
+  $('m-cache').textContent=(d.cache_tokens||0).toLocaleString();
+  $('m-hit').textContent=(d.cache_hit_rate||0).toFixed(1)+'%';
+  $('m-cost').textContent='$'+(d.cost_usd||0).toFixed(4);
+  $('m-saved').textContent='$'+(d.savings_usd||0).toFixed(4);
+  $('m-fp').textContent=(d.fp_suppression||0).toFixed(1)+'%';
 }
 
 function onComplete(d){
@@ -818,7 +849,6 @@ function onComplete(d){
     `<div class="done-stat df"> <div class="dv">${s.false_positives_intercepted}</div><div class="dl">FP Intercepted</div></div>`+
     `<div class="done-stat dw"> <div class="dv">${s.traders_watchlisted}</div><div class="dl">Watchlisted</div></div>`;
   setTimeout(()=>$('overlay-done').classList.add('show'),1800);
-  loadMetrics();
 }
 
 function onError(d){
@@ -847,9 +877,10 @@ function initChart(){
     options:{
       responsive:true,maintainAspectRatio:false,animation:false,
       scales:{
-        x:{display:false},
-        y:{display:true,position:'right',
-          ticks:{color:'#526a8a',font:{size:9,family:'monospace'},maxTicksLimit:4},
+        x:{type:'linear',display:false},
+        y:{display:true,position:'right',grace:'10%',
+          ticks:{color:'#526a8a',font:{size:9,family:'monospace'},
+            callback:function(v){return v.toFixed(1)+'%'}},
           grid:{color:'rgba(26,45,74,.3)'}}
       },
       plugins:{legend:{display:true,position:'top',align:'end',
@@ -859,17 +890,20 @@ function initChart(){
   });
 }
 
+const chartBase={};
 function updateChart(inst,price,ts){
   if(!priceChart||!inst)return;
   price=Number(price);if(!price||isNaN(price))return;
   if(!chartData[inst]){
     chartData[inst]=[];
+    chartBase[inst]=price;
     priceChart.data.datasets.push({
       label:inst,data:chartData[inst],
       borderColor:chartColors[inst]||'#888',fill:false,tension:0.2
     });
   }
-  chartData[inst].push({x:chartData[inst].length,y:price});
+  const pct=((price/chartBase[inst])-1)*100;
+  chartData[inst].push({x:chartData[inst].length,y:pct});
   if(chartData[inst].length>100)chartData[inst].shift();
   priceChart.update('none');
 }
@@ -910,13 +944,16 @@ async function investigateTrader(tid){
     const res=await fetch('/traders/'+tid+'/investigate',{method:'POST'});
     const d=await res.json();
     const tc=d.escalation_recommendation==='IMMEDIATE'?'esc':d.escalation_recommendation==='ELEVATED'?'rev':'dis';
+    const conf=d.coordinated_confidence||d.confidence||d.combined_risk_score||0;
     let html='<div style="margin-bottom:12px">'+
-      '<span class="tag '+tc+'">'+esc(d.scheme_type||'UNKNOWN')+'</span>'+
-      '<span class="tag '+tc+'">'+esc(d.escalation_recommendation||'N/A')+'</span>'+
-      '<span style="font-size:10px;color:var(--text-dim);margin-left:8px">Confidence: '+Math.round((d.coordinated_confidence||0)*100)+'%</span>'+
+      '<span class="tag '+tc+'">'+esc(d.scheme_type||d.verdict||'UNKNOWN')+'</span>'+
+      '<span class="tag '+tc+'">'+esc(d.escalation_recommendation||d.risk_level||'N/A')+'</span>'+
+      '<span style="font-size:10px;color:var(--text-dim);margin-left:8px">Confidence: '+Math.round(conf*100)+'%</span>'+
       '</div>';
-    html+='<div style="font-size:11px;line-height:1.6;margin-bottom:12px">'+esc(d.cross_alert_rationale||'')+'</div>';
-    html+='<div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">Combined Risk: <strong style="color:var(--text)">'+Math.round((d.combined_risk_score||0)*100)+'%</strong></div>';
+    const rationale=d.cross_alert_rationale||d.rationale||d.summary||'No detailed analysis available.';
+    html+='<div style="font-size:11px;line-height:1.6;margin-bottom:12px">'+esc(rationale)+'</div>';
+    const risk=d.combined_risk_score||d.risk_score||conf;
+    html+='<div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">Combined Risk: <strong style="color:var(--text)">'+Math.round(risk*100)+'%</strong></div>';
     if((d.regulatory_flags||[]).length) html+='<div style="font-size:10px;margin-bottom:8px">Flags: '+(d.regulatory_flags||[]).map(function(f){return '<span class="tag esc">'+esc(f)+'</span>';}).join(' ')+'</div>';
     html+='<div class="vc-action" style="margin-top:8px">→ '+esc(d.recommended_action||'')+'</div>';
     showModal('🔍 Cross-Alert Investigation: '+tid,html);
@@ -985,8 +1022,10 @@ function hideModal(){$('modal-overlay').classList.remove('show');}
       case 'alert':        onAlert(d);       break;
       case 'triaging':     onTriaging(d);    break;
       case 'verdict':      onVerdict(d);     break;
-      case 'watchlist':    onWatchlist(d);   break;
-      case 'complete':     onComplete(d); es.close(); break;
+      case 'workflow':       onWorkflow(d);       break;
+      case 'watchlist':       onWatchlist(d);      break;
+      case 'metrics_update': onMetricsUpdate(d);  break;
+      case 'complete':       onComplete(d); es.close(); break;
       case 'error':        onError(d);   es.close(); break;
     }
   };
