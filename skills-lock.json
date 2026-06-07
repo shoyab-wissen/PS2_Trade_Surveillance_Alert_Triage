@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "grill-me-codex": {
+      "source": "chaseai-yt/grill-me-codex",
+      "sourceType": "github",
+      "skillPath": "skills/grill-me-codex/SKILL.md",
+      "computedHash": "1a387e1a409008697cf5142940e17c7c9d2563ec4cd14a719072d1a193873769"
+    }
+  }
+}

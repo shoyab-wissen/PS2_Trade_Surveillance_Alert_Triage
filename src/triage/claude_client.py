@@ -194,7 +194,7 @@ class ClaudeTriageClient:
             self._mock_mode = True
 
         if self._mock_mode:
-            print("  [Claude] No valid API key — running in MOCK mode (realistic pre-computed verdicts)")
+            print("  [Claude] No valid API key - running in MOCK mode (realistic pre-computed verdicts)")
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -262,7 +262,7 @@ class ClaudeTriageClient:
         """
         Print a formatted per-call cost line and return the call cost in USD.
         Example output:
-          [Claude] CALL #3 | alert=TRD-...-LAY-0001 | in=180 cache↑=1,985 out=312 | cost=$0.0001 | saved=$0.0005
+          [Claude] CALL #3 | alert=TRD-...-LAY-0001 | in=180 cache_hit=1,985 out=312 | cost=$0.0001 | saved=$0.0005
         """
         cost = self._compute_cost(input_tokens, output_tokens, cache_read_tokens)
         # Savings = tokens served from cache at cheap price instead of full input price
@@ -270,7 +270,7 @@ class ClaudeTriageClient:
         self.total_cost_usd += cost
         print(
             f"  [Claude] CALL #{self.total_api_calls:02d} | {label} | "
-            f"in={input_tokens:,} cache↑={cache_read_tokens:,} out={output_tokens:,} | "
+            f"in={input_tokens:,} cache_hit={cache_read_tokens:,} out={output_tokens:,} | "
             f"cost=${cost:.4f} | saved=${savings:.4f}"
         )
         return cost
@@ -288,7 +288,7 @@ class ClaudeTriageClient:
             fb = dict(feedback)
         self.feedback_examples.append(fb)
         print(
-            f"  [Claude] Feedback stored for {fb.get('alert_id')} — "
+            f"  [Claude] Feedback stored for {fb.get('alert_id')} - "
             f"correct={fb.get('correct')} | note='{fb.get('analyst_note', '')}'"
         )
 
@@ -354,11 +354,11 @@ class ClaudeTriageClient:
                 messages=[{"role": "user", "content": user_prompt}]
             )
         except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
-            print(f"  [Claude] API auth failed ({e.status_code}) — switching to mock mode")
+            print(f"  [Claude] API auth failed ({e.status_code}) - switching to mock mode")
             self._mock_mode = True
             return self._mock_triage(alert, profile)
         except Exception as e:
-            print(f"  [Claude] API error ({type(e).__name__}) — switching to mock mode")
+            print(f"  [Claude] API error ({type(e).__name__}) - switching to mock mode")
             self._mock_mode = True
             return self._mock_triage(alert, profile)
 
@@ -585,7 +585,7 @@ class ClaudeTriageClient:
                 ),
                 "full_report": (
                     f"DAILY SURVEILLANCE REPORT\n\n"
-                    f"Summary: {len(alerts)} alerts processed — "
+                    f"Summary: {len(alerts)} alerts processed - "
                     f"{escalated} ESCALATE | {reviewed} REVIEW | {dismissed} DISMISS\n"
                     f"False Positive Rate: {fp_rate}%\n"
                     f"Traders on watchlist: {len(watchlist_status)}\n\n"

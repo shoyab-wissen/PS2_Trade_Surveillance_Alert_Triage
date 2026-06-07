@@ -16,12 +16,7 @@ import pandas as pd
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, StreamingResponse
 
-from src.ingestion.loader import (
-    load_events,
-    load_trader_profiles,
-    load_related_accounts,
-)
-from src.detection.engine import DetectionEngine
+from src.ingestion.loader import load_events
 from src.triage.claude_client import ClaudeTriageClient
 from src.ingestion.schemas import Alert, TriageResult
 
@@ -120,6 +115,7 @@ def _verdict_dict(alert: Alert, triage: TriageResult, is_fp: bool) -> dict:
     return {
         "type": "verdict",
         "alert_id": alert.alert_id,
+        "trader_id": alert.trader_id,
         "verdict": triage.verdict,
         "confidence": triage.confidence,
         "false_positive_probability": triage.false_positive_probability,
@@ -137,7 +133,8 @@ def _verdict_dict(alert: Alert, triage: TriageResult, is_fp: bool) -> dict:
 async def _ensure_ready() -> None:
     """
     Populate _cache with scenario data, alerts, and triage results.
-    Safe to call concurrently: subsequent callers poll until the first finishes.
+    Reuses pre-computed data from AppState (lifespan) to avoid redundant
+    baseline loading and detection — only runs triage.
     """
     global _cache
 
@@ -145,7 +142,6 @@ async def _ensure_ready() -> None:
         return
 
     if _cache["computing"]:
-        # Another coroutine is already computing — wait for it
         while _cache["computing"] and not _cache["ready"] and _cache["error"] is None:
             await asyncio.sleep(0.2)
         return
@@ -154,47 +150,41 @@ async def _ensure_ready() -> None:
     _cache["error"] = None
 
     try:
-        # Load baseline
-        baseline_df: pd.DataFrame = await asyncio.to_thread(
-            load_events, DATA_DIR / "trades_baseline.csv"
-        )
+        from src.api.routes import AppState
 
-        # Load scenario
+        # Reuse pre-computed alerts and profiles from lifespan startup
+        alerts: list[Alert] = AppState.alerts or []
+        profiles: dict = AppState.profiles or {}
+
+        # Load scenario DataFrame (needed for trade replay)
         scenario_df: pd.DataFrame = await asyncio.to_thread(
             load_events, DATA_DIR / "trades_scenario.csv"
         )
 
-        # Load profiles and related accounts
-        profiles: dict = await asyncio.to_thread(load_trader_profiles)
-        related_accounts: dict = await asyncio.to_thread(load_related_accounts)
+        # If AppState has no alerts, fall back to running detection
+        if not alerts and AppState.engine:
+            alerts = await asyncio.to_thread(AppState.engine.run, scenario_df)
 
-        # Run detection engine
-        def _run_detection():
-            engine = DetectionEngine(baseline_df, related_accounts)
-            return engine.run(scenario_df)
-
-        alerts: list[Alert] = await asyncio.to_thread(_run_detection)
-
-        # Run triage
+        # Run triage (fast in mock mode, ~1-2s with API)
         def _run_triage():
             client = ClaudeTriageClient()
             return client.triage_all(alerts, profiles, {}, set())
 
         triage_results: list[TriageResult] = await asyncio.to_thread(_run_triage)
-
         triage_map: dict[str, TriageResult] = {r.alert_id: r for r in triage_results}
 
-        _cache.update(
-            {
-                "ready": True,
-                "computing": False,
-                "scenario_df": scenario_df,
-                "alerts": alerts,
-                "triage_map": triage_map,
-                "profiles": profiles,
-                "error": None,
-            }
-        )
+        _cache.update({
+            "ready": True,
+            "computing": False,
+            "scenario_df": scenario_df,
+            "alerts": alerts,
+            "triage_map": triage_map,
+            "profiles": profiles,
+            "error": None,
+        })
+
+        AppState.alerts = alerts
+        AppState.triage_results = triage_map
 
     except Exception as exc:
         _cache["computing"] = False

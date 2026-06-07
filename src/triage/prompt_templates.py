@@ -14,27 +14,32 @@ The trader places large orders on one side to create artificial price pressure, 
 them rapidly after executing a smaller order on the opposite side at the manipulated price.
 Key indicators: cancel_ratio >70%, time-to-cancel <2s, opposite-side fill at elevated price.
 Statistical threshold: z_score >2.5σ vs trader's own 30-day baseline.
+Regulatory basis: EU MAR Art 12(1)(a)(ii), SEC Rule 10b-5 / Dodd-Frank §747, SEBI PFUTP Reg 4(2)(a).
 
 ### WASH TRADING
 Related accounts (same beneficial owner) trade with each other to inflate volume without
 genuine economic transfer. No real change in beneficial ownership.
 Key indicators: matched BUY/SELL pairs (price within 0.1%, qty within 5%), shared beneficial
 owner, wash_fraction >20% of instrument volume.
+Regulatory basis: EU MAR Art 12(1)(a)(i), Securities Exchange Act §9(a)(1), SEBI PFUTP Reg 4(2)(c).
 
 ### MOMENTUM IGNITION
 Burst of aggressive orders to start/exacerbate a directional price trend, then reversal to
 profit from the movement they created. Designed to trigger other participants' stop orders.
 Key indicators: >=5 aggressive same-side orders in <3 min, price move >=0.5%, reversal within 10 min.
+Regulatory basis: EU MAR Art 12(2)(c), Dodd-Frank Act §747, SEBI PFUTP Reg 4(2)(a).
 
 ### PRICE RAMPING
 Sequential executions at escalating prices in rapid succession to create false impression
 of demand. Takes out multiple order book levels to paint a rising price.
 Key indicators: >=4 executions same-side in <10 min, monotonicity >=80%, price drift >=0.3%.
+Regulatory basis: EU MAR Art 12(1)(a)(ii), SEC Rule 10b-5, SEBI PFUTP Reg 4(2)(b).
 
 ### MARKING THE CLOSE
 Aggressive trading in the final minutes of the session to manipulate the official closing price,
 benefiting derivatives or benchmark-linked positions.
 Key indicators: dominant volume in close window, price drift >=0.3%, trader fraction >=40%.
+Regulatory basis: EU MAR Art 12(1)(a)(ii), FCA MAR 1.6.11, SEBI PFUTP Reg 4(2)(e).
 
 ## FALSE POSITIVE INDICATORS (MUST actively consider these)
 - HIGH CANCEL RATES: Market makers legitimately cancel 70-90% of orders as part of quote management.
@@ -61,6 +66,9 @@ Respond ONLY with valid JSON matching this exact structure:
 ESCALATE: genuine manipulation, high confidence, needs immediate regulatory escalation.
 REVIEW: suspicious but legitimate explanation possible, needs human review.
 DISMISS: false positive, legitimate trading behaviour.
+
+When the verdict is ESCALATE or REVIEW, cite the applicable regulation in your rationale
+(e.g., "prohibited under MAR Article 12(1)(a)(ii)" or "per SEC Rule 10b-5").
 """
 
 

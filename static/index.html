@@ -283,6 +283,106 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
 
 /* ═══ MISC ══════════════════════════════════════════════════════════════════ */
 .empty{font-size:11px;color:var(--text-dim);text-align:center;padding:22px 0;font-family:var(--font-mono);letter-spacing:1px}
+
+/* ═══ PRICE CHART ══════════════════════════════════════════════════════ */
+#chart-strip{
+  height:88px;border-bottom:1px solid var(--border);background:var(--surface);
+  padding:2px 12px 2px 12px;flex-shrink:0;position:relative;
+}
+#chart-strip canvas{width:100%!important;height:100%!important}
+.chart-label{position:absolute;top:3px;left:14px;font-size:8px;color:var(--text-dim);
+  letter-spacing:2px;text-transform:uppercase;font-weight:800;z-index:2}
+
+/* ═══ METRICS BAR ══════════════════════════════════════════════════════ */
+#metrics-bar{
+  height:36px;border-top:1px solid var(--border);background:var(--surface);
+  display:flex;align-items:center;padding:0 18px;gap:18px;flex-shrink:0;overflow-x:auto;
+}
+.m-item{display:flex;align-items:center;gap:4px;font-family:var(--font-mono);font-size:10px;white-space:nowrap}
+.m-label{color:var(--text-dim);font-size:8px;letter-spacing:.5px;text-transform:uppercase}
+.m-val{color:var(--text-bright);font-weight:600}
+.m-val.green{color:var(--green)}.m-val.blue{color:var(--blue)}
+.m-val.cyan{color:var(--cyan)}.m-val.orange{color:var(--orange)}.m-val.purple{color:var(--purple)}
+.m-sep{width:1px;height:18px;background:var(--border);flex-shrink:0}
+
+/* ═══ FEEDBACK ═════════════════════════════════════════════════════════ */
+.fb-row{display:flex;gap:5px;margin-top:7px;align-items:center;flex-wrap:wrap}
+.fb-btn{
+  font-size:9px;padding:3px 10px;border-radius:4px;border:1px solid;
+  cursor:pointer;font-weight:600;transition:all .15s;font-family:var(--font-ui);background:transparent;
+}
+.fb-btn:hover{filter:brightness(1.3)}
+.fb-agree{border-color:rgba(0,230,118,.35);color:var(--green)}
+.fb-agree:hover{background:rgba(0,230,118,.12)}
+.fb-override{border-color:rgba(255,214,0,.35);color:var(--yellow)}
+.fb-override:hover{background:rgba(255,214,0,.1)}
+.fb-sel{
+  font-size:9px;padding:2px 6px;border-radius:3px;border:1px solid var(--border2);
+  background:var(--surface2);color:var(--text);font-family:var(--font-mono);cursor:pointer;
+}
+.fb-done{font-size:9px;color:var(--green);font-weight:600;animation:pop-in .3s ease}
+.fb-err{font-size:9px;color:var(--red);font-weight:600}
+
+/* ═══ ACTION BUTTONS ═══════════════════════════════════════════════════ */
+.dl-btn{
+  display:inline-flex;align-items:center;gap:4px;font-size:9px;padding:3px 8px;
+  border-radius:4px;border:1px solid rgba(41,182,246,.3);color:var(--blue);
+  text-decoration:none;cursor:pointer;transition:all .15s;background:transparent;
+  font-family:var(--font-ui);font-weight:600;
+}
+.dl-btn:hover{background:rgba(41,182,246,.1)}
+.inv-btn{
+  font-size:9px;padding:3px 8px;border-radius:4px;border:1px solid rgba(206,147,216,.3);
+  color:var(--purple);cursor:pointer;transition:all .15s;background:transparent;
+  font-family:var(--font-ui);font-weight:600;
+}
+.inv-btn:hover{background:rgba(206,147,216,.1)}
+
+/* ═══ QUERY INPUT ══════════════════════════════════════════════════════ */
+.query-wrap{display:flex;gap:4px;align-items:center;flex:1;margin-left:8px;max-width:220px}
+#query-input{
+  flex:1;font-size:10px;padding:3px 8px;border-radius:4px;
+  border:1px solid var(--border2);background:var(--surface2);
+  color:var(--text);font-family:var(--font-mono);outline:none;transition:border-color .2s;
+}
+#query-input:focus{border-color:var(--cyan)}
+#query-input::placeholder{color:var(--text-dim);font-size:9px}
+#query-btn{
+  font-size:9px;padding:3px 7px;border-radius:4px;border:1px solid var(--border2);
+  background:var(--surface2);color:var(--cyan);cursor:pointer;font-weight:600;transition:all .15s;
+}
+#query-btn:hover{background:rgba(0,229,255,.1)}
+
+/* ═══ MODAL ════════════════════════════════════════════════════════════ */
+#modal-overlay{
+  position:fixed;inset:0;z-index:800;background:rgba(6,13,26,.85);
+  backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;
+}
+#modal-overlay.show{display:flex}
+.modal-card{
+  background:var(--surface);border:1px solid var(--border2);border-radius:10px;
+  padding:20px 24px;max-width:620px;width:92%;max-height:80vh;overflow-y:auto;
+  animation:pop-in .35s cubic-bezier(.175,.885,.32,1.275);
+}
+.modal-card::-webkit-scrollbar{width:3px}
+.modal-card::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.modal-title{font-size:13px;font-weight:700;color:var(--text-bright);margin-bottom:12px;
+  display:flex;align-items:center;justify-content:space-between}
+.modal-close{background:none;border:none;color:var(--text-dim);font-size:16px;cursor:pointer;padding:2px 6px}
+.modal-close:hover{color:var(--text)}
+.modal-body{font-size:11px;color:var(--text);line-height:1.6}
+.modal-body .tag{display:inline-block;font-size:9px;padding:2px 6px;border-radius:3px;font-weight:700;margin-right:4px}
+.tag.esc{background:rgba(244,67,54,.2);color:var(--red)}
+.tag.rev{background:rgba(255,214,0,.18);color:var(--yellow)}
+.tag.dis{background:rgba(0,230,118,.15);color:var(--green)}
+.qr-item{padding:7px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.qr-item:last-child{border-bottom:none}
+.qr-sev{font-size:8px;font-weight:800;padding:2px 5px;border-radius:3px;letter-spacing:.5px;flex-shrink:0}
+.qr-sev.CRITICAL{background:rgba(244,67,54,.2);color:var(--red)}
+.qr-sev.HIGH{background:rgba(255,145,0,.2);color:var(--orange)}
+.qr-sev.MEDIUM{background:rgba(255,214,0,.18);color:var(--yellow)}
+.qr-sev.LOW{background:rgba(77,182,172,.3);color:#4db6ac}
+.qr-info{font-family:var(--font-mono);font-size:10px;color:var(--text)}
 </style>
 </head>
 <body>
@@ -342,6 +442,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
   <span class="phase-time-tag" id="phase-time">--:--</span>
 </div>
 
+<!-- ──────────────── PRICE CHART ──────────────── -->
+<div id="chart-strip">
+  <span class="chart-label">▸ INSTRUMENT PRICES · LIVE</span>
+  <canvas id="priceChart"></canvas>
+</div>
+
 <!-- ──────────────── MAIN GRID ──────────────── -->
 <div id="grid">
 
@@ -360,6 +466,10 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
   <div class="panel">
     <div class="p-head">
       <span>⚠ ANOMALY ALERTS</span>
+      <div class="query-wrap">
+        <input id="query-input" placeholder="Ask Claude…" onkeydown="if(event.key==='Enter')runQuery()"/>
+        <button id="query-btn" onclick="runQuery()">⏎</button>
+      </div>
       <span class="p-badge" id="cnt-alert">0 fired</span>
     </div>
     <div class="p-body" id="alerts">
@@ -398,6 +508,30 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
 
 </div><!-- /grid -->
 
+<!-- ──────────────── METRICS BAR ──────────────── -->
+<div id="metrics-bar">
+  <div class="m-item"><span class="m-label">API CALLS</span><span class="m-val blue" id="m-calls">—</span></div>
+  <div class="m-sep"></div>
+  <div class="m-item"><span class="m-label">INPUT TOK</span><span class="m-val" id="m-in">—</span></div>
+  <div class="m-item"><span class="m-label">OUTPUT TOK</span><span class="m-val" id="m-out">—</span></div>
+  <div class="m-item"><span class="m-label">CACHE TOK</span><span class="m-val cyan" id="m-cache">—</span></div>
+  <div class="m-sep"></div>
+  <div class="m-item"><span class="m-label">CACHE HIT</span><span class="m-val green" id="m-hit">—</span></div>
+  <div class="m-item"><span class="m-label">COST</span><span class="m-val orange" id="m-cost">—</span></div>
+  <div class="m-item"><span class="m-label">SAVED</span><span class="m-val green" id="m-saved">—</span></div>
+  <div class="m-sep"></div>
+  <div class="m-item"><span class="m-label">FP SUPPRESSION</span><span class="m-val purple" id="m-fp">—</span></div>
+</div>
+
+<!-- ──────────────── MODAL ──────────────── -->
+<div id="modal-overlay" onclick="if(event.target===this)hideModal()">
+  <div class="modal-card">
+    <div class="modal-title"><span id="modal-title-text"></span><button class="modal-close" onclick="hideModal()">✕</button></div>
+    <div class="modal-body" id="modal-body"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4/dist/chart.umd.min.js" defer></script>
 <script>
 /* ══════════════════════════════════════════════════════════════════════════
    RESTART
@@ -528,6 +662,7 @@ function onTrade(d){
   const f=$('feed');
   while(f.children.length>300)f.removeChild(f.firstChild);
   scrollBot(f);
+  updateChart(d.instrument,d.price,d.ts);
 }
 
 function onFastForward(d){
@@ -593,16 +728,29 @@ function buildVC(d,isFp){
   const fp=Math.round(d.false_positive_probability*100);
   const kf=(d.key_factors||[]).slice(0,3).map(f=>`<li>${esc(f)}</li>`).join('');
   const fpTag=isFp?`<span class="fp-label">FALSE POSITIVE</span>`:'';
+  const aid=d.alert_id||'';
+  const tid=d.trader_id||'';
+
+  let extra='';
+  if(!isFp){
+    let btns='';
+    if(d.verdict==='ESCALATE') btns+=`<a class="dl-btn" href="/report/case/${esc(aid)}" target="_blank">📄 PDF Report</a>`;
+    if(tid) btns+=`<button class="inv-btn" onclick="investigateTrader('${esc(tid)}')">🔍 Investigate ${esc(tid)}</button>`;
+    if(btns) extra+=`<div class="fb-row" style="gap:6px">${btns}</div>`;
+    extra+=`<div class="fb-row" id="fb-${esc(aid)}"><button class="fb-btn fb-agree" onclick="submitFeedback('${esc(aid)}',true)">✓ Agree</button><button class="fb-btn fb-override" onclick="showOverride('${esc(aid)}')">✗ Override</button></div>`;
+  }
+
   return `
     <div class="vc-head">
       <div class="vbadge ${d.verdict}">${esc(d.verdict)}</div>
       ${fpTag}
-      <div class="vc-id">${esc(d.alert_id)}</div>
+      <div class="vc-id">${esc(aid)}</div>
       <div class="vc-conf">${conf}% conf &nbsp;·&nbsp; ${fp}% FP prob</div>
     </div>
     <div class="vc-rat" onclick="this.classList.toggle('expanded')">${esc(d.rationale)}</div>
     <ul class="vc-factors">${kf}</ul>
     <div class="vc-action">→ ${esc(d.recommended_action)}</div>
+    ${extra}
   `;
 }
 
@@ -670,6 +818,7 @@ function onComplete(d){
     `<div class="done-stat df"> <div class="dv">${s.false_positives_intercepted}</div><div class="dl">FP Intercepted</div></div>`+
     `<div class="done-stat dw"> <div class="dv">${s.traders_watchlisted}</div><div class="dl">Watchlisted</div></div>`;
   setTimeout(()=>$('overlay-done').classList.add('show'),1800);
+  loadMetrics();
 }
 
 function onError(d){
@@ -682,9 +831,147 @@ function onError(d){
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   CHART · FEEDBACK · QUERY · INVESTIGATE · METRICS
+══════════════════════════════════════════════════════════════════════════ */
+let priceChart;
+const chartData={};
+const chartColors={AAPL:'#29b6f6',TSLA:'#f44336',MSFT:'#00e676',NVDA:'#00e5ff',AMZN:'#ff9100',HDFCBANK:'#ce93d8'};
+
+function initChart(){
+  if(typeof Chart==='undefined'){setTimeout(initChart,200);return;}
+  const ctx=$('priceChart');
+  if(!ctx)return;
+  priceChart=new Chart(ctx,{
+    type:'line',
+    data:{datasets:[]},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:false,
+      scales:{
+        x:{display:false},
+        y:{display:true,position:'right',
+          ticks:{color:'#526a8a',font:{size:9,family:'monospace'},maxTicksLimit:4},
+          grid:{color:'rgba(26,45,74,.3)'}}
+      },
+      plugins:{legend:{display:true,position:'top',align:'end',
+        labels:{color:'#526a8a',font:{size:8},boxWidth:8,padding:6}}},
+      elements:{point:{radius:0},line:{borderWidth:1.5}}
+    }
+  });
+}
+
+function updateChart(inst,price,ts){
+  if(!priceChart||!inst)return;
+  price=Number(price);if(!price||isNaN(price))return;
+  if(!chartData[inst]){
+    chartData[inst]=[];
+    priceChart.data.datasets.push({
+      label:inst,data:chartData[inst],
+      borderColor:chartColors[inst]||'#888',fill:false,tension:0.2
+    });
+  }
+  chartData[inst].push({x:chartData[inst].length,y:price});
+  if(chartData[inst].length>100)chartData[inst].shift();
+  priceChart.update('none');
+}
+
+async function submitFeedback(aid,correct,corrected){
+  const fb=$('fb-'+aid);if(!fb)return;
+  try{
+    const body={correct:correct,analyst_note:correct?'Analyst confirmed verdict':'Analyst override',corrected_verdict:corrected||null};
+    const res=await fetch('/alerts/'+aid+'/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data=await res.json();
+    if(res.ok){
+      fb.innerHTML='<span class="fb-done">✓ Feedback recorded — few-shot example #'+((data.few_shot_examples_stored)||1)+' stored</span>';
+    }else{
+      fb.innerHTML='<span class="fb-err">✗ '+(data.detail||'Error')+'</span>';
+    }
+  }catch(e){fb.innerHTML='<span class="fb-err">✗ Network error</span>';}
+}
+
+function showOverride(aid){
+  const fb=$('fb-'+aid);if(!fb)return;
+  fb.innerHTML=
+    '<select class="fb-sel" id="sel-'+aid+'"><option value="ESCALATE">ESCALATE</option><option value="REVIEW">REVIEW</option><option value="DISMISS">DISMISS</option></select>'+
+    '<button class="fb-btn fb-override" onclick="submitFeedback(\''+aid+'\',false,document.getElementById(\'sel-'+aid+'\').value)">Submit</button>'+
+    '<button class="fb-btn" style="color:var(--text-dim);border-color:var(--border)" onclick="restoreFeedback(\''+aid+'\')">Cancel</button>';
+}
+
+function restoreFeedback(aid){
+  const fb=$('fb-'+aid);if(!fb)return;
+  fb.innerHTML=
+    '<button class="fb-btn fb-agree" onclick="submitFeedback(\''+aid+'\',true)">✓ Agree</button>'+
+    '<button class="fb-btn fb-override" onclick="showOverride(\''+aid+'\')">✗ Override</button>';
+}
+
+async function investigateTrader(tid){
+  showModal('🔍 Investigating Trader '+tid,
+    '<div style="text-align:center;padding:20px"><div class="spin-ring" style="width:20px;height:20px;border-color:var(--purple);border-top-color:transparent;display:inline-block"></div><br/><span style="font-size:10px;color:var(--text-dim);margin-top:8px;display:block">Claude is analysing cross-alert patterns…</span></div>');
+  try{
+    const res=await fetch('/traders/'+tid+'/investigate',{method:'POST'});
+    const d=await res.json();
+    const tc=d.escalation_recommendation==='IMMEDIATE'?'esc':d.escalation_recommendation==='ELEVATED'?'rev':'dis';
+    let html='<div style="margin-bottom:12px">'+
+      '<span class="tag '+tc+'">'+esc(d.scheme_type||'UNKNOWN')+'</span>'+
+      '<span class="tag '+tc+'">'+esc(d.escalation_recommendation||'N/A')+'</span>'+
+      '<span style="font-size:10px;color:var(--text-dim);margin-left:8px">Confidence: '+Math.round((d.coordinated_confidence||0)*100)+'%</span>'+
+      '</div>';
+    html+='<div style="font-size:11px;line-height:1.6;margin-bottom:12px">'+esc(d.cross_alert_rationale||'')+'</div>';
+    html+='<div style="font-size:10px;color:var(--text-dim);margin-bottom:6px">Combined Risk: <strong style="color:var(--text)">'+Math.round((d.combined_risk_score||0)*100)+'%</strong></div>';
+    if((d.regulatory_flags||[]).length) html+='<div style="font-size:10px;margin-bottom:8px">Flags: '+(d.regulatory_flags||[]).map(function(f){return '<span class="tag esc">'+esc(f)+'</span>';}).join(' ')+'</div>';
+    html+='<div class="vc-action" style="margin-top:8px">→ '+esc(d.recommended_action||'')+'</div>';
+    showModal('🔍 Cross-Alert Investigation: '+tid,html);
+  }catch(e){showModal('🔍 Investigation Error','<span class="fb-err">'+e.message+'</span>');}
+}
+
+async function runQuery(){
+  const inp=$('query-input');
+  const q=(inp.value||'').trim();if(!q)return;
+  showModal('🔎 Query: "'+esc(q)+'"',
+    '<div style="text-align:center;padding:20px"><div class="spin-ring" style="width:20px;height:20px;border-color:var(--cyan);border-top-color:transparent;display:inline-block"></div></div>');
+  try{
+    const res=await fetch('/query',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:q})});
+    const d=await res.json();
+    let html='<div style="font-size:10px;color:var(--text-dim);margin-bottom:10px">'+esc(d.interpretation||'')+'</div>';
+    html+='<div style="font-size:10px;margin-bottom:10px">Found <strong>'+d.result_count+'</strong> matching alert(s)</div>';
+    if(d.alerts&&d.alerts.length){
+      d.alerts.slice(0,10).forEach(function(a){
+        const vt=a.verdict?('<span class="tag '+(a.verdict==='ESCALATE'?'esc':a.verdict==='REVIEW'?'rev':'dis')+'" style="margin-left:auto">'+a.verdict+'</span>'):'';
+        html+='<div class="qr-item"><span class="qr-sev '+a.severity+'">'+a.severity+'</span>'+
+          '<span class="qr-info">'+esc(a.pattern_type.replace(/_/g,' '))+' · '+esc(a.trader_id)+' · '+esc(a.instrument)+' · z='+a.z_score+'σ</span>'+vt+'</div>';
+      });
+    }else{html+='<div style="color:var(--text-dim);font-size:10px;text-align:center;padding:12px">No matching alerts</div>';}
+    showModal('🔎 Query Results',html);
+  }catch(e){showModal('🔎 Query Error','<span class="fb-err">'+e.message+'</span>');}
+  inp.value='';
+}
+
+async function loadMetrics(){
+  try{
+    const res=await fetch('/metrics');const d=await res.json();
+    const c=d.claude_api||{};
+    $('m-calls').textContent=c.total_api_calls||0;
+    $('m-in').textContent=(c.total_input_tokens||0).toLocaleString();
+    $('m-out').textContent=(c.total_output_tokens||0).toLocaleString();
+    $('m-cache').textContent=(c.cache_read_input_tokens||0).toLocaleString();
+    $('m-hit').textContent=(c.cache_hit_rate_pct||0)+'%';
+    $('m-cost').textContent='$'+(c.estimated_cost_usd||0).toFixed(4);
+    $('m-saved').textContent='$'+(c.savings_from_caching_usd||0).toFixed(4);
+    $('m-fp').textContent=(d.detection?.fp_suppression_rate_pct||0)+'%';
+  }catch(e){}
+}
+
+function showModal(title,bodyHtml){
+  $('modal-title-text').innerHTML=title;
+  $('modal-body').innerHTML=bodyHtml;
+  $('modal-overlay').classList.add('show');
+}
+function hideModal(){$('modal-overlay').classList.remove('show');}
+
+/* ══════════════════════════════════════════════════════════════════════════
    SSE
 ══════════════════════════════════════════════════════════════════════════ */
 (function startSSE(){
+  initChart();
   const es=new EventSource('/stream');
   es.onmessage=e=>{
     let d; try{d=JSON.parse(e.data);}catch{return;}

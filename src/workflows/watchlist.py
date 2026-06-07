@@ -32,7 +32,7 @@ class WatchlistManager:
         self._entries[trader_id] = entry
         # Also record this alert if not already recorded
         self.record_alert(trader_id, alert_id)
-        print(f"  [Watchlist] Flagged trader {trader_id} for {duration_hours}h — reason: {reason}")
+        print(f"  [Watchlist] Flagged trader {trader_id} for {duration_hours}h - reason: {reason}")
 
     def is_flagged(self, trader_id: str) -> bool:
         """Check if trader is currently on watchlist (not expired)."""
@@ -41,7 +41,7 @@ class WatchlistManager:
             return False
         expiry = entry.flagged_at + timedelta(hours=entry.duration_hours)
         if datetime.utcnow() > expiry:
-            # Entry has expired — remove it silently
+            # Entry has expired - remove it silently
             del self._entries[trader_id]
             return False
         return True
