@@ -39,6 +39,7 @@ async def lifespan(app: FastAPI):
     if scenario_path.exists():
         scenario_df = load_events(scenario_path)
         print(f"[startup] Scenario: {len(scenario_df):,} events — auto-detecting alerts...")
+        AppState.scenario_df = scenario_df
         if AppState.engine:
             AppState.alerts = AppState.engine.run(scenario_df)
             print(f"[startup] Pre-detected {len(AppState.alerts)} alert(s)")

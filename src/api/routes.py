@@ -32,6 +32,7 @@ router = APIRouter()
 # Global app state (populated by lifespan in main.py)
 class AppState:
     baseline_df = None
+    scenario_df = None
     profiles: dict = {}
     related_accounts: dict = {}
     engine: Optional[DetectionEngine] = None
@@ -328,15 +329,52 @@ async def investigate_trader(trader_id: str):
         raise HTTPException(404, f"No alerts found for trader {trader_id}")
 
     from src.ingestion.schemas import TraderProfile
+    from src.detection.statistics import compute_trader_7day_summary
+    from src.triage.prompt_templates import format_7day_history
+
     profile = AppState.profiles.get(trader_id, TraderProfile(
         trader_id=trader_id, account_type="unknown", market_maker_registered=False))
     prior = AppState.watchlist.prior_alert_count(trader_id)
     on_wl = AppState.watchlist.is_flagged(trader_id)
 
+    # Compute 7-day trader history for behavioral context
+    history_block = ""
+    history_meta = {}
+    if AppState.engine and AppState.baseline_df is not None:
+        try:
+            summary = compute_trader_7day_summary(
+                trader_id,
+                AppState.baseline_df,
+                AppState.scenario_df,
+                AppState.engine.stats,
+            )
+            history_block = format_7day_history(summary)
+            history_meta = {
+                "is_new_trader": summary.is_new_trader,
+                "days_covered": summary.days_covered,
+                "date_range": summary.date_range,
+                "avg_cancel_ratio": summary.avg_cancel_ratio,
+                "avg_daily_volume": summary.avg_daily_volume,
+                "avg_order_to_trade_ratio": summary.avg_order_to_trade_ratio,
+                "close_volume_fraction": summary.close_volume_fraction,
+                "cancel_ratio_zscore": summary.cancel_ratio_zscore,
+                "daily_volume_zscore": summary.daily_volume_zscore,
+                "consistency": "habitual" if summary.cancel_ratio_daily_std < 0.05 else
+                               "moderate" if summary.cancel_ratio_daily_std < 0.15 else "variable",
+                "instruments": summary.instruments_traded,
+            }
+            print(f"  [Investigate] 7-day history for {trader_id}: "
+                  f"{'NEW TRADER' if summary.is_new_trader else f'{summary.days_covered} days'}, "
+                  f"cancel_ratio={summary.avg_cancel_ratio:.3f}, "
+                  f"consistency={history_meta['consistency']}")
+        except Exception as e:
+            print(f"  [Investigate] Error computing 7-day history for {trader_id}: {e}")
+
     claude = get_claude()
     try:
         result = claude.investigate_trader(
-            trader_id, trader_alerts, AppState.profiles, prior, on_wl
+            trader_id, trader_alerts, AppState.profiles, prior, on_wl,
+            trader_history=history_block,
         )
     except Exception as e:
         print(f"  [Investigate] Error for {trader_id}: {e}")
@@ -356,6 +394,11 @@ async def investigate_trader(trader_id: str):
             "recommended_action": "Manual review required due to analysis error.",
             "sections": {},
         }
+
+    # Include 7-day history metadata in the response
+    if history_meta:
+        result["trader_history"] = history_meta
+
     return result
 
 
@@ -375,7 +418,45 @@ async def daily_report():
 
     claude = get_claude()
     report = claude.generate_daily_report(triaged_alerts, triage_list, watchlist_status, date_str)
+    # Cache the latest report for PDF generation
+    AppState._last_daily_report = report
     return report
+
+
+@router.get("/report/daily/pdf",
+            summary="Download the daily compliance report as a PDF",
+            response_class=Response)
+async def daily_report_pdf():
+    """Generate and return a PDF of the daily compliance report."""
+    # Use cached report if available, otherwise generate fresh
+    report_data = getattr(AppState, "_last_daily_report", None)
+    if not report_data:
+        if not AppState.triage_results:
+            raise HTTPException(400, "No triage results yet — run a simulation first")
+        from datetime import datetime
+        triaged_alerts = [a for a in AppState.alerts if a.alert_id in AppState.triage_results]
+        triage_list = [AppState.triage_results[a.alert_id] for a in triaged_alerts]
+        watchlist_status = AppState.watchlist.get_status()
+        date_str = datetime.utcnow().strftime("%Y-%m-%d")
+        claude = get_claude()
+        report_data = claude.generate_daily_report(
+            triaged_alerts, triage_list, watchlist_status, date_str
+        )
+        AppState._last_daily_report = report_data
+
+    pdf_gen = ComplianceReportGenerator()
+    pdf_bytes = pdf_gen.generate_daily_report_pdf(report_data)
+    if not pdf_bytes:
+        raise HTTPException(500, "PDF generation failed — reportlab may not be installed")
+
+    report_date = report_data.get("report_date", "unknown")
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="daily_compliance_report_{report_date}.pdf"'
+        },
+    )
 
 
 # ─── Natural Language Query ───────────────────────────────────────────────────────

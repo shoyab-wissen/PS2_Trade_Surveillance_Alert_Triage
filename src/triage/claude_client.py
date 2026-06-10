@@ -578,6 +578,7 @@ class ClaudeTriageClient:
         profiles: dict[str, TraderProfile],
         prior_count: int = 0,
         on_watchlist: bool = False,
+        trader_history: str = "",
     ) -> dict:
         """
         Send all alerts for a trader in a single prompt and ask Claude to assess
@@ -606,7 +607,8 @@ class ClaudeTriageClient:
             }
 
         user_prompt = build_investigate_prompt(
-            trader_id, alerts, profiles, prior_count, on_watchlist
+            trader_id, alerts, profiles, prior_count, on_watchlist,
+            trader_history=trader_history,
         )
         assert self.client is not None
         try:

@@ -320,11 +320,26 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
     <div class="page" id="pg-report">
       <div class="card">
         <div class="card-title">Daily Compliance Report
-          <button class="btn-sm btn-rpt" onclick="fetchDailyReport()">&#x1f4cb; Generate Report</button>
+          <div style="display:flex;gap:6px">
+            <button class="btn-sm btn-rpt" onclick="fetchDailyReport()">&#x1f4cb; Generate Report</button>
+            <button class="btn-sm btn-inv" id="btn-view-pdf" style="display:none" onclick="showReportPDF()">&#x1f4c4; View PDF</button>
+            <a class="btn-sm btn-jira" id="btn-dl-pdf" style="display:none" href="/report/daily/pdf" download>&#x2b07; Download PDF</a>
+          </div>
         </div>
         <div id="report-content">
           <div class="empty-state"><div class="es-icon">&#x1f4cb;</div><div class="es-title">No report generated yet</div>
           <div class="es-desc">Run a simulation first, then click "Generate Report" to create a daily compliance report.</div></div>
+        </div>
+        <!-- In-app PDF viewer -->
+        <div id="pdf-viewer" style="display:none;margin-top:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:#1a1a2e">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--surface2);border-bottom:1px solid var(--border)">
+            <span style="font-size:10px;font-weight:700;color:var(--text-dim);letter-spacing:1px">PDF PREVIEW</span>
+            <div style="display:flex;gap:6px">
+              <a href="/report/daily/pdf" download class="btn-sm btn-jira" style="font-size:9px;padding:3px 10px">&#x2b07; Download</a>
+              <button class="btn-sm btn-rpt" style="font-size:9px;padding:3px 10px" onclick="hideReportPDF()">&#x2715; Close</button>
+            </div>
+          </div>
+          <iframe id="pdf-iframe" src="" style="width:100%;height:75vh;border:none;background:#2a2a3e"></iframe>
         </div>
       </div>
     </div>
@@ -1053,6 +1068,19 @@ function renderReport(d){
   }
 
   $('report-content').innerHTML=html;
+
+  /* Show PDF buttons after report is generated */
+  $('btn-view-pdf').style.display='inline-flex';
+  $('btn-dl-pdf').style.display='inline-flex';
+}
+
+function showReportPDF(){
+  $('pdf-viewer').style.display='block';
+  $('pdf-iframe').src='/report/daily/pdf?t='+Date.now();
+}
+function hideReportPDF(){
+  $('pdf-viewer').style.display='none';
+  $('pdf-iframe').src='';
 }
 
 /* MODAL */

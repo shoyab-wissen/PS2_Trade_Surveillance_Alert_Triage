@@ -238,3 +238,226 @@ class BaselineStats:
 
         z = (observed - mean_val) / std_val
         return float(np.clip(z, -10.0, 10.0))
+
+
+# ── 7-Day Trader Summary ──────────────────────────────────────────────────────
+
+@dataclass
+class Trader7DaySummary:
+    trader_id: str
+    is_new_trader: bool
+    days_covered: int
+    date_range: str
+
+    # Daily averages
+    avg_daily_orders: float = 0.0
+    avg_daily_cancels: float = 0.0
+    avg_daily_executions: float = 0.0
+    avg_daily_volume: float = 0.0
+    avg_cancel_ratio: float = 0.0
+    avg_order_to_trade_ratio: float = 0.0
+    avg_median_ttc_ms: float = 0.0
+    close_volume_fraction: float = 0.0
+
+    # Consistency across days (low std = habitual)
+    cancel_ratio_daily_std: float = 0.0
+    daily_volume_daily_std: float = 0.0
+
+    # Breadth
+    instruments_traded: list = field(default_factory=list)
+    session_distribution: dict = field(default_factory=dict)
+    side_bias: float = 0.5  # BUY fraction, 0.5 = balanced
+
+    # Z-scores vs full baseline
+    cancel_ratio_zscore: float = 0.0
+    daily_volume_zscore: float = 0.0
+    order_to_trade_zscore: float = 0.0
+    close_volume_zscore: float = 0.0
+
+
+def compute_trader_7day_summary(
+    trader_id: str,
+    baseline_df: pd.DataFrame | None,
+    scenario_df: pd.DataFrame | None,
+    baseline_stats: BaselineStats,
+) -> Trader7DaySummary:
+    """
+    Compute a 7-day activity summary for a trader from available trade data.
+    Falls back to market-wide averages for new traders.
+    """
+    # Combine all available data
+    frames = []
+    if baseline_df is not None and not baseline_df.empty:
+        frames.append(baseline_df)
+    if scenario_df is not None and not scenario_df.empty:
+        frames.append(scenario_df)
+
+    if not frames:
+        return _market_average_summary(trader_id, baseline_stats)
+
+    combined = pd.concat(frames, ignore_index=True)
+
+    # Filter to this trader
+    trader_df = combined[combined["trader_id"] == trader_id].copy()
+
+    if trader_df.empty:
+        return _market_average_summary(trader_id, baseline_stats)
+
+    # Ensure timestamp is datetime
+    if not pd.api.types.is_datetime64_any_dtype(trader_df["timestamp"]):
+        trader_df["timestamp"] = pd.to_datetime(
+            trader_df["timestamp"], utc=True, errors="coerce"
+        )
+
+    # Last 7 calendar days
+    ref_date = trader_df["timestamp"].max()
+    cutoff = ref_date - pd.Timedelta(days=7)
+    recent = trader_df[trader_df["timestamp"] >= cutoff].copy()
+
+    if recent.empty:
+        return _market_average_summary(trader_id, baseline_stats)
+
+    recent["date"] = recent["timestamp"].dt.date
+
+    unique_dates = sorted(recent["date"].unique())
+    days_covered = len(unique_dates)
+    date_range = f"{unique_dates[0]} to {unique_dates[-1]}"
+
+    # ── Per-day metrics ──────────────────────────────────────────────────────
+
+    places = recent[recent["event_type"] == "ORDER_PLACE"]
+    cancels = recent[recent["event_type"] == "ORDER_CANCEL"]
+    execs = recent[recent["event_type"] == "TRADE_EXECUTE"]
+
+    daily_orders = places.groupby("date").size()
+    daily_cancels = cancels.groupby("date").size()
+    daily_execs = execs.groupby("date").size()
+
+    # Cancel ratio per day
+    daily_cr = []
+    for d in unique_dates:
+        p = daily_orders.get(d, 0)
+        c = daily_cancels.get(d, 0)
+        total = p + c
+        daily_cr.append(c / total if total > 0 else 0.0)
+    daily_cr_series = pd.Series(daily_cr)
+
+    # Daily volume (executed quantity)
+    daily_vol = execs.groupby("date")["quantity"].sum() if not execs.empty else pd.Series(dtype=float)
+
+    # Order-to-trade ratio per day
+    daily_otr = []
+    for d in unique_dates:
+        orders = daily_orders.get(d, 0) + daily_cancels.get(d, 0)
+        trades = daily_execs.get(d, 0)
+        daily_otr.append(orders / trades if trades > 0 else orders)
+    daily_otr_series = pd.Series(daily_otr)
+
+    # Median TTC (time-to-cancel)
+    avg_ttc = 0.0
+    if not places.empty and not cancels.empty:
+        place_ts = places[["order_id", "timestamp"]].rename(
+            columns={"timestamp": "place_ts"}
+        )
+        cancel_ts = cancels[["related_order_id", "timestamp"]].rename(
+            columns={"timestamp": "cancel_ts", "related_order_id": "order_id"}
+        )
+        merged = place_ts.merge(cancel_ts, on="order_id", how="inner")
+        if not merged.empty:
+            ttc_ms = (merged["cancel_ts"] - merged["place_ts"]).dt.total_seconds() * 1000
+            ttc_ms = ttc_ms[ttc_ms > 0]
+            avg_ttc = float(ttc_ms.median()) if not ttc_ms.empty else 0.0
+
+    # Close volume fraction
+    close_vol = 0.0
+    if "session" in recent.columns and not execs.empty:
+        close_execs = execs[execs["session"] == "CLOSE"]
+        total_exec_vol = execs["quantity"].sum()
+        close_exec_vol = close_execs["quantity"].sum() if not close_execs.empty else 0.0
+        close_vol = close_exec_vol / total_exec_vol if total_exec_vol > 0 else 0.0
+
+    # Session distribution
+    session_dist = {}
+    if "session" in recent.columns:
+        sess_counts = recent["session"].value_counts(normalize=True)
+        session_dist = {str(k): round(float(v), 3) for k, v in sess_counts.items()}
+
+    # Side bias
+    side_counts = recent[recent["event_type"].isin(["ORDER_PLACE", "TRADE_EXECUTE"])]
+    buy_count = len(side_counts[side_counts["side"] == "BUY"]) if "side" in side_counts.columns else 0
+    total_sides = len(side_counts) if not side_counts.empty else 1
+    side_bias = buy_count / total_sides if total_sides > 0 else 0.5
+
+    # Instruments
+    instr_counts = recent["instrument"].value_counts()
+    total_instr = instr_counts.sum()
+    instruments = [
+        f"{instr} ({round(100 * cnt / total_instr)}%)"
+        for instr, cnt in instr_counts.head(5).items()
+    ]
+
+    # ── Aggregate ────────────────────────────────────────────────────────────
+    avg_cancel_ratio = float(daily_cr_series.mean())
+    avg_daily_vol = float(daily_vol.mean()) if not daily_vol.empty else 0.0
+
+    # Z-scores vs full baseline
+    cr_z = baseline_stats.z_score(trader_id, "cancel_ratio", avg_cancel_ratio)
+    vol_z = baseline_stats.z_score(trader_id, "daily_volume", avg_daily_vol)
+    otr_z = baseline_stats.z_score(
+        trader_id, "order_to_trade_ratio", float(daily_otr_series.mean())
+    )
+    cv_z = baseline_stats.z_score(trader_id, "close_volume_fraction", close_vol)
+
+    return Trader7DaySummary(
+        trader_id=trader_id,
+        is_new_trader=False,
+        days_covered=days_covered,
+        date_range=date_range,
+        avg_daily_orders=round(float(daily_orders.mean()), 1) if not daily_orders.empty else 0.0,
+        avg_daily_cancels=round(float(daily_cancels.mean()), 1) if not daily_cancels.empty else 0.0,
+        avg_daily_executions=round(float(daily_execs.mean()), 1) if not daily_execs.empty else 0.0,
+        avg_daily_volume=round(avg_daily_vol, 1),
+        avg_cancel_ratio=round(avg_cancel_ratio, 4),
+        avg_order_to_trade_ratio=round(float(daily_otr_series.mean()), 2),
+        avg_median_ttc_ms=round(avg_ttc, 1),
+        close_volume_fraction=round(close_vol, 4),
+        cancel_ratio_daily_std=round(float(daily_cr_series.std()), 4) if len(daily_cr_series) > 1 else 0.0,
+        daily_volume_daily_std=round(float(daily_vol.std()), 1) if len(daily_vol) > 1 else 0.0,
+        instruments_traded=instruments,
+        session_distribution=session_dist,
+        side_bias=round(side_bias, 3),
+        cancel_ratio_zscore=round(cr_z, 2),
+        daily_volume_zscore=round(vol_z, 2),
+        order_to_trade_zscore=round(otr_z, 2),
+        close_volume_zscore=round(cv_z, 2),
+    )
+
+
+def _market_average_summary(
+    trader_id: str, baseline_stats: BaselineStats
+) -> Trader7DaySummary:
+    """Return a summary built from market-wide averages for a new trader."""
+    mkt, _ = baseline_stats.get("__nonexistent__")  # forces fallback to market stats
+    return Trader7DaySummary(
+        trader_id=trader_id,
+        is_new_trader=True,
+        days_covered=0,
+        date_range="N/A (new trader)",
+        avg_daily_orders=0.0,
+        avg_daily_cancels=0.0,
+        avg_daily_executions=0.0,
+        avg_daily_volume=round(mkt.daily_volume_mean, 1),
+        avg_cancel_ratio=round(mkt.cancel_ratio_mean, 4),
+        avg_order_to_trade_ratio=round(mkt.order_to_trade_ratio_mean, 2),
+        avg_median_ttc_ms=round(mkt.median_ttc_ms_mean, 1),
+        close_volume_fraction=round(mkt.close_volume_fraction_mean, 4),
+        cancel_ratio_daily_std=round(mkt.cancel_ratio_std, 4),
+        daily_volume_daily_std=round(mkt.daily_volume_std, 1),
+        instruments_traded=["(market average)"],
+        session_distribution={"REGULAR": 0.85, "PRE": 0.05, "CLOSE": 0.10},
+        side_bias=0.5,
+        cancel_ratio_zscore=0.0,
+        daily_volume_zscore=0.0,
+        order_to_trade_zscore=0.0,
+        close_volume_zscore=0.0,
+    )

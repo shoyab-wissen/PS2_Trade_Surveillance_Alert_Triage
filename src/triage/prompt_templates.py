@@ -120,6 +120,78 @@ def build_batch_user_prompt(alerts: list[Alert], profiles: dict, prior_counts: d
     return batch_prompt
 
 
+# ─── 7-Day Trader History Formatter ────────────────────────────────────────────
+
+def format_7day_history(summary) -> str:
+    """
+    Format a Trader7DaySummary into a concise text block for the investigation prompt.
+    """
+    if summary.is_new_trader:
+        source = "Market-wide averages (NEW TRADER — no prior trading history)"
+        note = (
+            "\nNOTE: This trader has NO prior trading history in our system. "
+            "Market-wide averages are shown for reference. Any deviation from "
+            "market norms should be evaluated carefully, but also consider that "
+            "the trader lacks an established personal baseline."
+        )
+    else:
+        source = "Trader's own trading history"
+        # Determine consistency note
+        if summary.cancel_ratio_daily_std < 0.05:
+            consistency = "VERY CONSISTENT (habitual)"
+            note = (
+                f"\nNOTE: This trader's cancel ratio is highly consistent "
+                f"(daily std={summary.cancel_ratio_daily_std:.4f}). "
+                f"If the alerted cancel ratio is within this 7-day range, "
+                f"it likely represents normal behavior for this trader rather than an anomaly."
+            )
+        elif summary.cancel_ratio_daily_std < 0.15:
+            consistency = "moderately consistent"
+            note = ""
+        else:
+            consistency = "variable (inconsistent)"
+            note = (
+                f"\nNOTE: This trader's behavior is variable across the 7-day window "
+                f"(cancel ratio std={summary.cancel_ratio_daily_std:.4f}). "
+                f"Sudden spikes are harder to distinguish from normal variance."
+            )
+
+    # Format instruments
+    instr_str = ", ".join(summary.instruments_traded) if summary.instruments_traded else "None"
+
+    # Format session distribution
+    sess_parts = []
+    for s in ["PRE", "REGULAR", "CLOSE"]:
+        pct = summary.session_distribution.get(s, 0.0)
+        sess_parts.append(f"{s} {round(pct * 100)}%")
+    sess_str = " | ".join(sess_parts)
+
+    def z_fmt(z: float) -> str:
+        return f"+{z:.1f}σ" if z >= 0 else f"{z:.1f}σ"
+
+    return f"""TRADER ACTIVITY HISTORY (LAST 7 DAYS)
+Source: {source}
+Period: {summary.date_range} ({summary.days_covered} active trading days)
+
+Daily Averages:
+  Orders placed:      {summary.avg_daily_orders:.0f}/day
+  Orders cancelled:   {summary.avg_daily_cancels:.0f}/day  (cancel ratio: {summary.avg_cancel_ratio * 100:.1f}%, z={z_fmt(summary.cancel_ratio_zscore)} vs baseline)
+  Trades executed:    {summary.avg_daily_executions:.0f}/day
+  Volume executed:    {summary.avg_daily_volume:,.0f} units/day (z={z_fmt(summary.daily_volume_zscore)} vs baseline)
+  Order-to-trade:     {summary.avg_order_to_trade_ratio:.1f} (z={z_fmt(summary.order_to_trade_zscore)} vs baseline)
+  Median TTC:         {summary.avg_median_ttc_ms:,.0f}ms
+  Close vol fraction: {summary.close_volume_fraction * 100:.1f}% (z={z_fmt(summary.close_volume_zscore)} vs baseline)
+
+Instruments: {instr_str}
+Sessions: {sess_str}
+Side Bias: {summary.side_bias * 100:.0f}% BUY / {(1 - summary.side_bias) * 100:.0f}% SELL
+
+Behavior Consistency (std across {summary.days_covered} days):
+  Cancel ratio: std={summary.cancel_ratio_daily_std:.4f}{f' ({consistency})' if not summary.is_new_trader else ''}
+  Daily volume: std={summary.daily_volume_daily_std:,.0f}
+{note}"""
+
+
 # ─── Cross-alert trader investigation ──────────────────────────────────────────
 
 def build_investigate_prompt(
@@ -128,6 +200,7 @@ def build_investigate_prompt(
     profiles: dict,
     prior_count: int,
     on_watchlist: bool,
+    trader_history: str = "",
 ) -> str:
     """
     Build a prompt asking Claude to assess whether multiple alerts for the same
@@ -151,6 +224,11 @@ def build_investigate_prompt(
             f"  Evidence: {json.dumps(alert.evidence, indent=4)}\n"
         )
 
+    # Include trader history block if available
+    history_section = ""
+    if trader_history:
+        history_section = f"\n{trader_history}\n"
+
     return f"""CROSS-ALERT TRADER INVESTIGATION
 
 Trader: {trader_id}
@@ -159,7 +237,7 @@ Market Maker Registered: {mm_reg}
 On Watchlist: {on_watchlist}
 Prior alerts (last 90 days): {prior_count}
 Total alerts this session: {len(alerts)}
-
+{history_section}
 ALERTS FOR THIS TRADER:
 {alerts_block}
 
@@ -167,6 +245,11 @@ TASK: Provide a MULTI-SECTION deep-dive investigation of this trader. Assess whe
 1. A COORDINATED MANIPULATION SCHEME (multiple patterns working together)
 2. INDEPENDENT UNRELATED EVENTS (coincidental and unconnected)
 3. SYSTEMATIC BEHAVIOUR (same pattern repeated, habitual manipulation)
+
+Consider the trader's recent 7-day activity history when assessing anomaly significance.
+If the alerted behavior is consistent with the trader's recent pattern (low daily variance in key metrics),
+note this as a mitigating factor — it may represent habitual behavior rather than sudden manipulation.
+If the behavior represents a sudden departure from the 7-day trend, note this as an aggravating factor.
 
 Respond with JSON containing these assessment sections:
 {{
@@ -183,7 +266,7 @@ Respond with JSON containing these assessment sections:
     }},
     "behavioral_assessment": {{
       "title": "Behavioral Pattern Assessment",
-      "finding": "<2-3 sentences: what the trading behavior reveals about intent - order-to-cancel ratios, directional bias, timing clusters>",
+      "finding": "<2-3 sentences: what the trading behavior reveals about intent — compare with 7-day history, note consistency or deviation>",
       "risk_level": "HIGH" | "MEDIUM" | "LOW"
     }},
     "market_impact": {{
@@ -198,8 +281,8 @@ Respond with JSON containing these assessment sections:
       "risk_level": "HIGH" | "MEDIUM" | "LOW"
     }},
     "historical_context": {{
-      "title": "Historical Context & Recurrence",
-      "finding": "<2-3 sentences: significance of prior alert count, watchlist status, whether this is escalating behavior>",
+      "title": "Historical Context & 7-Day Trend",
+      "finding": "<2-3 sentences: how current behavior compares to the 7-day trading history, whether this is escalating/consistent/new behavior, significance of z-scores>",
       "risk_level": "HIGH" | "MEDIUM" | "LOW"
     }}
   }},
@@ -208,7 +291,7 @@ Respond with JSON containing these assessment sections:
     {{"factor": "<factor name>", "score": <int 0-100>, "detail": "<short explanation>"}}
   ],
 
-  "cross_alert_rationale": "<3-5 sentence executive summary>",
+  "cross_alert_rationale": "<3-5 sentence executive summary incorporating 7-day behavioral context>",
   "regulatory_flags": ["<flag1>", "<flag2>"],
   "recommended_action": "<specific next step for L2 surveillance desk>"
 }}"""

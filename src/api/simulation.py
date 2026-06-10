@@ -167,6 +167,7 @@ async def _ensure_ready() -> None:
             load_events, DATA_DIR / "trades_scenario.csv"
         )
 
+        AppState.scenario_df = scenario_df
         if not alerts and AppState.engine:
             alerts = await asyncio.to_thread(AppState.engine.run, scenario_df)
             AppState.alerts = alerts
