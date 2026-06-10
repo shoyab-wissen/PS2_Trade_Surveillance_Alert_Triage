@@ -15,6 +15,7 @@ def _read_env_file() -> dict:
 
 class Settings(BaseSettings):
     anthropic_api_key: str = ""
+    surveillance_api_key: str = ""  # Optional: set to require X-API-Key header on POST endpoints
     jira_base_url: str = ""
     jira_api_token: str = ""
     jira_user_email: str = ""

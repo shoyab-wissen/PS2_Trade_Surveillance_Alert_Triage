@@ -2,33 +2,41 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 
-from src.ingestion.schemas import Alert
-from src.detection.statistics import BaselineStats
+from src.ingestion.schemas import Alert, TraderProfile
+from src.detection.statistics import BaselineStats, MarketVolatility
 
 
 class MarkingCloseDetector:
     """
     Detects marking the close: dominating close-window volume to push settlement price.
 
-    Fire when ALL:
-    - session == CLOSE
-    - price_drift_pct >= 0.3% across close window
-    - trader_close_fraction >= 0.40 (trader's share of total close-window volume)
-    - z_score of close volume vs trader's baseline close fraction >= 3.0
+    Improvements over v1:
+    - Fund/index exemption: accounts with type='fund' get elevated thresholds
+    - Volatility normalization for price drift threshold
+    - Impact-based severity: considers trader's price impact vs market drift
     """
 
     PRICE_DRIFT_THRESHOLD = 0.003   # 0.3%
     TRADER_FRACTION_THRESHOLD = 0.40
+    FUND_FRACTION_THRESHOLD = 0.60    # Higher threshold for fund accounts (rebalancing)
     MIN_Z_SCORE = 3.0
 
-    def __init__(self, events_df: pd.DataFrame, stats: BaselineStats):
+    def __init__(self, events_df: pd.DataFrame, stats: BaselineStats,
+                 profiles: dict[str, TraderProfile] | None = None,
+                 market_volatility: MarketVolatility | None = None):
         self.df = events_df.copy() if events_df is not None else pd.DataFrame()
         self.stats = stats
+        self.profiles = profiles or {}
+        self.volatility = market_volatility or MarketVolatility()
         self._counter = 0
 
     def _next_alert_id(self) -> str:
         self._counter += 1
         return f"TRD-{datetime.now().strftime('%Y%m%d')}-MKC-{self._counter:04d}"
+
+    def _is_fund(self, trader_id: str) -> bool:
+        profile = self.profiles.get(trader_id)
+        return bool(profile and profile.account_type in ("fund", "index_fund", "etf"))
 
     def detect(self) -> list[Alert]:
         alerts: list[Alert] = []
@@ -41,7 +49,6 @@ class MarkingCloseDetector:
             df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
         df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
 
-        # Only CLOSE session TRADE_EXECUTE events
         close_df = df[
             (df["event_type"] == "TRADE_EXECUTE") & (df["session"] == "CLOSE")
         ].copy()
@@ -49,7 +56,11 @@ class MarkingCloseDetector:
         if close_df.empty:
             return alerts
 
-        # Add date column for grouping
+        # Volatility-adjusted price drift threshold
+        vf = self.volatility.volatility_factor
+        adjusted_drift = self.PRICE_DRIFT_THRESHOLD * vf
+        adjusted_min_z = max(self.MIN_Z_SCORE * (1.0 / vf), 2.0)
+
         close_df["date"] = close_df["timestamp"].dt.date
 
         seen_events: set[tuple] = set()
@@ -58,12 +69,10 @@ class MarkingCloseDetector:
             if day_close.empty:
                 continue
 
-            # Market-wide close volume for this instrument-day
             total_close_volume = day_close["quantity"].sum()
             if total_close_volume == 0:
                 continue
 
-            # Price drift across the close window (market-wide)
             sorted_day = day_close.sort_values("timestamp")
             first_price = float(sorted_day.iloc[0]["price"])
             last_price = float(sorted_day.iloc[-1]["price"])
@@ -72,10 +81,9 @@ class MarkingCloseDetector:
                 continue
 
             price_drift_pct = abs(last_price - first_price) / first_price
-            if price_drift_pct < self.PRICE_DRIFT_THRESHOLD:
+            if price_drift_pct < adjusted_drift:
                 continue
 
-            # Per-trader analysis within this close window
             for trader_id, trader_close in day_close.groupby("trader_id"):
                 bucket = (trader_id, instrument, str(date))
                 if bucket in seen_events:
@@ -84,31 +92,38 @@ class MarkingCloseDetector:
                 trader_close_volume = trader_close["quantity"].sum()
                 trader_close_fraction = trader_close_volume / total_close_volume
 
-                if trader_close_fraction < self.TRADER_FRACTION_THRESHOLD:
+                # Fund exemption: higher threshold for fund accounts
+                is_fund = self._is_fund(trader_id)
+                threshold = self.FUND_FRACTION_THRESHOLD if is_fund else self.TRADER_FRACTION_THRESHOLD
+
+                if trader_close_fraction < threshold:
                     continue
 
-                # Z-score: compare trader's close fraction to their baseline close fraction
                 z = self.stats.z_score(
                     trader_id, "close_volume_fraction_mean", trader_close_fraction
                 )
-                if z < self.MIN_Z_SCORE:
+                if z < adjusted_min_z:
                     continue
 
                 seen_events.add(bucket)
 
-                # Determine dominant side
                 buy_vol = trader_close[trader_close["side"] == "BUY"]["quantity"].sum()
                 sell_vol = trader_close[trader_close["side"] == "SELL"]["quantity"].sum()
                 dominant_side = "BUY" if buy_vol >= sell_vol else "SELL"
 
-                # Severity based on fraction and z
-                if trader_close_fraction > 0.60 and z > 4.5:
-                    severity = "HIGH"
-                else:
-                    severity = "MEDIUM"
+                # Compute trader's price impact
+                trader_avg_price = float(trader_close["price"].mean())
+                market_avg_price = float(day_close["price"].mean())
+                price_impact = abs(trader_avg_price - market_avg_price) / max(market_avg_price, 0.01)
+
+                # Notional impact
+                notional_impact = float(trader_close_volume) * abs(last_price - first_price)
+
+                severity = self._compute_severity(
+                    trader_close_fraction, z, notional_impact, price_impact, is_fund
+                )
 
                 price_direction = "UP" if last_price > first_price else "DOWN"
-
                 baseline_stat, _ = self.stats.get(trader_id)
 
                 alert = Alert(
@@ -129,6 +144,11 @@ class MarkingCloseDetector:
                         "trader_close_fraction": round(float(trader_close_fraction), 4),
                         "dominant_side": dominant_side,
                         "n_trader_close_trades": len(trader_close),
+                        "trader_price_impact": round(price_impact, 6),
+                        "notional_impact": round(notional_impact, 2),
+                        "estimated_impact": round(notional_impact, 2),
+                        "fund_exemption_applied": is_fund,
+                        "market_volatility_factor": self.volatility.volatility_factor,
                     },
                     event_ids=list(trader_close["event_id"]),
                     z_score=round(z, 4),
@@ -143,3 +163,59 @@ class MarkingCloseDetector:
                 alerts.append(alert)
 
         return alerts
+
+    def _compute_severity(self, trader_fraction: float, z: float,
+                          notional_impact: float, price_impact: float,
+                          is_fund: bool) -> str:
+        score = 0
+
+        # Trader fraction (0-25)
+        if trader_fraction > 0.70:
+            score += 25
+        elif trader_fraction > 0.55:
+            score += 20
+        elif trader_fraction > 0.45:
+            score += 15
+        else:
+            score += 10
+
+        # Z-score (0-25)
+        if z > 5.0:
+            score += 25
+        elif z > 4.0:
+            score += 20
+        elif z > 3.5:
+            score += 15
+        else:
+            score += 10
+
+        # Notional impact (0-25)
+        if notional_impact > 50000:
+            score += 25
+        elif notional_impact > 10000:
+            score += 15
+        elif notional_impact > 1000:
+            score += 10
+        else:
+            score += 5
+
+        # Price impact (0-15)
+        if price_impact > 0.005:  # >0.5% price impact
+            score += 15
+        elif price_impact > 0.002:
+            score += 10
+        else:
+            score += 5
+
+        # Fund exemption: reduce score by 15 points
+        if is_fund:
+            score = max(score - 15, 0)
+
+        if score >= 70:
+            return "CRITICAL"
+        elif score >= 50:
+            return "HIGH"
+        elif score >= 30:
+            return "MEDIUM"
+        else:
+            return "LOW"

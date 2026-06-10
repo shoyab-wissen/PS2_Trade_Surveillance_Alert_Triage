@@ -34,6 +34,7 @@ class Alert(BaseModel):
     severity: str            # LOW | MEDIUM | HIGH | CRITICAL
     trader_id: str
     instrument: str
+    jurisdiction: str = "UNKNOWN"  # EU | US | IN | UK | UNKNOWN — derived from instrument venue
     evidence: dict
     event_ids: list[str]
     z_score: float

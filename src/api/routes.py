@@ -1,3 +1,5 @@
+import asyncio
+import re
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Response
 from pydantic import BaseModel
 from typing import Optional
@@ -14,16 +16,24 @@ from src.workflows.watchlist import WatchlistManager
 from src.workflows.jira_client import JiraClient
 from src.workflows.slack_client import SlackClient
 from src.workflows.report_generator import ComplianceReportGenerator
+from src.database import Database
 
 REPORTS_DIR = Path(__file__).parent.parent.parent / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
 
+MAX_UPLOAD_SIZE = 100 * 1024 * 1024  # 100 MB max file upload
+
+
+def _sanitize_alert_id(alert_id: str) -> str:
+    """Sanitize alert_id to prevent path traversal attacks."""
+    return re.sub(r'[^a-zA-Z0-9_\-]', '', alert_id)
+
 
 def _save_pdf(alert_id: str, pdf_bytes: bytes) -> str:
-    """Save PDF to reports/ and return the file path string."""
-    path = REPORTS_DIR / f"case_{alert_id}.pdf"
+    safe_id = _sanitize_alert_id(alert_id)
+    path = REPORTS_DIR / f"case_{safe_id}.pdf"
     path.write_bytes(pdf_bytes)
-    print(f"  [PDF] Saved compliance case → {path}")
+    print(f"  [PDF] Saved compliance case -> {path}")
     return str(path)
 
 
@@ -39,8 +49,11 @@ class AppState:
     watchlist: Optional[WatchlistManager] = None
     alerts: list[Alert] = []
     triage_results: dict[str, TriageResult] = {}
-    simulation_runs: list[dict] = []  # stored simulation run results
+    simulation_runs: list[dict] = []
     feedback_history: list = []
+    db: Optional[Database] = None
+    _lock: Optional[asyncio.Lock] = None
+    _last_daily_report: Optional[dict] = None
 
 _claude_client: Optional[ClaudeTriageClient] = None
 
@@ -51,6 +64,14 @@ def get_claude():
     return _claude_client
 
 
+async def _with_lock(coro):
+    """Execute coroutine with AppState lock if available."""
+    if AppState._lock:
+        async with AppState._lock:
+            return await coro
+    return await coro
+
+
 # ─── Ingest ────────────────────────────────────────────────────────────────────
 
 @router.post("/ingest", summary="Upload a scenario CSV and run detection")
@@ -59,15 +80,36 @@ async def ingest(file: UploadFile = File(...)):
         raise HTTPException(503, "Detection engine not initialised — baseline data missing")
 
     content = await file.read()
-    df = load_events(io.StringIO(content.decode("utf-8")))
+
+    # Input validation
+    if len(content) > MAX_UPLOAD_SIZE:
+        raise HTTPException(413, f"File too large. Maximum size: {MAX_UPLOAD_SIZE // (1024*1024)} MB")
+
+    try:
+        decoded = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(400, "File must be UTF-8 encoded CSV")
+
+    df = load_events(io.StringIO(decoded))
     alerts = AppState.engine.run(df)
 
     existing_ids = {a.alert_id for a in AppState.alerts}
     new_alerts = [a for a in alerts if a.alert_id not in existing_ids]
-    AppState.alerts.extend(new_alerts)
+
+    if AppState._lock:
+        async with AppState._lock:
+            AppState.alerts.extend(new_alerts)
+    else:
+        AppState.alerts.extend(new_alerts)
+
+    # Persist to DB
+    if AppState.db:
+        AppState.db.save_alerts(new_alerts)
 
     for a in new_alerts:
         AppState.watchlist.record_alert(a.trader_id, a.alert_id)
+        if AppState.db:
+            AppState.db.save_watchlist_alert(a.trader_id, a.alert_id)
 
     return {
         "ingested_events": len(df),
@@ -84,12 +126,15 @@ async def list_alerts(
     severity: Optional[str] = Query(None, description="Filter by severity: LOW|MEDIUM|HIGH|CRITICAL"),
     pattern: Optional[str] = Query(None, description="Filter by pattern type"),
     triaged: Optional[bool] = Query(None, description="Filter by whether alert has been triaged"),
+    jurisdiction: Optional[str] = Query(None, description="Filter by jurisdiction: US|EU|UK|IN"),
 ):
     alerts = AppState.alerts
     if severity:
         alerts = [a for a in alerts if a.severity == severity.upper()]
     if pattern:
         alerts = [a for a in alerts if a.pattern_type == pattern.upper()]
+    if jurisdiction:
+        alerts = [a for a in alerts if a.jurisdiction == jurisdiction.upper()]
     if triaged is True:
         alerts = [a for a in alerts if a.alert_id in AppState.triage_results]
     if triaged is False:
@@ -103,11 +148,12 @@ async def list_alerts(
 
 @router.get("/alerts/{alert_id}", summary="Get full alert details with triage result")
 async def get_alert(alert_id: str):
-    alert = next((a for a in AppState.alerts if a.alert_id == alert_id), None)
+    safe_id = _sanitize_alert_id(alert_id)
+    alert = next((a for a in AppState.alerts if a.alert_id == safe_id), None)
     if not alert:
-        raise HTTPException(404, f"Alert {alert_id} not found")
+        raise HTTPException(404, f"Alert {safe_id} not found")
 
-    triage = AppState.triage_results.get(alert_id)
+    triage = AppState.triage_results.get(safe_id)
     return {
         "alert": alert.model_dump(),
         "triage": triage.model_dump() if triage else None,
@@ -130,8 +176,20 @@ async def triage_alert(alert_id: str):
 
     claude = get_claude()
     result = claude.triage_single(alert, profile, prior, on_wl)
-    AppState.triage_results[alert_id] = result
+
+    # Thread-safe state update
+    if AppState._lock:
+        async with AppState._lock:
+            AppState.triage_results[alert_id] = result
+    else:
+        AppState.triage_results[alert_id] = result
+
     AppState.watchlist.record_alert(alert.trader_id, alert_id)
+
+    # Persist to DB
+    if AppState.db:
+        AppState.db.save_triage(result)
+        AppState.db.save_watchlist_alert(alert.trader_id, alert_id)
 
     # Trigger workflows
     jira_key = None
@@ -144,8 +202,9 @@ async def triage_alert(alert_id: str):
         slack = SlackClient()
         result.slack_message_sent = slack.send_alert(alert, result, jira_key)
         AppState.watchlist.flag_trader(alert.trader_id, alert.pattern_type, alert_id)
+        if AppState.db:
+            AppState.db.save_watchlist_entry(alert.trader_id, alert.pattern_type, alert_id)
 
-        # 3rd workflow action: PDF compliance case
         pdf_gen = ComplianceReportGenerator()
         pdf_bytes = pdf_gen.generate_case_pdf(alert, result)
         pdf_path = _save_pdf(alert_id, pdf_bytes) if pdf_bytes else None
@@ -185,12 +244,17 @@ async def submit_feedback(alert_id: str, body: FeedbackBody):
         corrected_verdict=body.corrected_verdict,
     )
 
-    # Store in feedback history on AppState
-    if not hasattr(AppState, "feedback_history"):
-        AppState.feedback_history = []
-    AppState.feedback_history.append(feedback)
+    # Thread-safe state update
+    if AppState._lock:
+        async with AppState._lock:
+            AppState.feedback_history.append(feedback)
+    else:
+        AppState.feedback_history.append(feedback)
 
-    # Inject into Claude client's few-shot store for future calls
+    # Persist to DB
+    if AppState.db:
+        AppState.db.save_feedback(feedback)
+
     claude = get_claude()
     claude.add_feedback(feedback)
 
@@ -207,6 +271,7 @@ async def submit_feedback(alert_id: str, body: FeedbackBody):
             "Verdict confirmed correct. Stored as a positive few-shot example."
         ),
     }
+
 # ─── Watchlist ─────────────────────────────────────────────────────────────────
 
 @router.get("/watchlist", summary="Current enhanced-monitoring watchlist")
@@ -239,8 +304,18 @@ async def run_demo():
     workflow_log = []
 
     for alert, result in zip(AppState.alerts, triage_results):
-        AppState.triage_results[alert.alert_id] = result
+        if AppState._lock:
+            async with AppState._lock:
+                AppState.triage_results[alert.alert_id] = result
+        else:
+            AppState.triage_results[alert.alert_id] = result
+
         AppState.watchlist.record_alert(alert.trader_id, alert.alert_id)
+
+        # Persist
+        if AppState.db:
+            AppState.db.save_triage(result)
+            AppState.db.save_watchlist_alert(alert.trader_id, alert.alert_id)
 
         log_entry = {
             "alert_id": alert.alert_id,
@@ -261,7 +336,9 @@ async def run_demo():
             result.slack_message_sent = slack.send_alert(alert, result, result.jira_ticket_id)
             log_entry["slack_sent"] = result.slack_message_sent
             AppState.watchlist.flag_trader(alert.trader_id, alert.pattern_type, alert.alert_id)
-            # 3rd workflow: PDF compliance case
+            if AppState.db:
+                AppState.db.save_watchlist_entry(alert.trader_id, alert.pattern_type, alert.alert_id)
+
             pdf_gen = ComplianceReportGenerator()
             pdf_bytes = pdf_gen.generate_case_pdf(alert, result)
             if pdf_bytes:
@@ -395,7 +472,6 @@ async def investigate_trader(trader_id: str):
             "sections": {},
         }
 
-    # Include 7-day history metadata in the response
     if history_meta:
         result["trader_history"] = history_meta
 
@@ -418,7 +494,6 @@ async def daily_report():
 
     claude = get_claude()
     report = claude.generate_daily_report(triaged_alerts, triage_list, watchlist_status, date_str)
-    # Cache the latest report for PDF generation
     AppState._last_daily_report = report
     return report
 
@@ -427,9 +502,7 @@ async def daily_report():
             summary="Download the daily compliance report as a PDF",
             response_class=Response)
 async def daily_report_pdf():
-    """Generate and return a PDF of the daily compliance report."""
-    # Use cached report if available, otherwise generate fresh
-    report_data = getattr(AppState, "_last_daily_report", None)
+    report_data = AppState._last_daily_report
     if not report_data:
         if not AppState.triage_results:
             raise HTTPException(400, "No triage results yet — run a simulation first")
@@ -464,17 +537,22 @@ async def daily_report_pdf():
 class QueryBody(BaseModel):
     question: str
 
+    class Config:
+        json_schema_extra = {"example": {"question": "Show me all high severity layering alerts"}}
+
 
 @router.post("/query",
              summary="Natural language alert query — Claude parses question into filters")
 async def nl_query(body: QueryBody):
-    if not body.question.strip():
+    question = body.question.strip()
+    if not question:
         raise HTTPException(400, "question must not be empty")
+    if len(question) > 500:
+        raise HTTPException(400, "question must be under 500 characters")
 
     claude  = get_claude()
-    filters = claude.natural_language_query(body.question)
+    filters = claude.natural_language_query(question)
 
-    # Apply returned filters to in-memory alerts
     alerts = list(AppState.alerts)
     if filters.get("severity"):
         alerts = [a for a in alerts if a.severity == filters["severity"]]
@@ -505,23 +583,25 @@ async def nl_query(body: QueryBody):
         "result_count": len(alerts),
         "alerts": [_alert_summary(a) for a in alerts],
     }
+
 # ─── PDF Report Download ────────────────────────────────────────────────────────────
 
 @router.get("/report/case/{alert_id}",
             summary="Download the PDF compliance case report for an ESCALATE alert",
             response_class=Response)
 async def download_case_pdf(alert_id: str):
-    pdf_path = REPORTS_DIR / f"case_{alert_id}.pdf"
+    safe_id = _sanitize_alert_id(alert_id)
+    pdf_path = REPORTS_DIR / f"case_{safe_id}.pdf"
     if not pdf_path.exists():
         raise HTTPException(
             404,
-            f"No PDF report found for {alert_id}. "
+            f"No PDF report found for {safe_id}. "
             "Triage the alert first — PDFs are generated only for ESCALATE verdicts."
         )
     return Response(
         content=pdf_path.read_bytes(),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="case_{alert_id}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="case_{safe_id}.pdf"'},
     )
 
 # ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -534,6 +614,7 @@ def _alert_summary(alert: Alert) -> dict:
         "severity": alert.severity,
         "trader_id": alert.trader_id,
         "instrument": alert.instrument,
+        "jurisdiction": alert.jurisdiction,
         "z_score": round(alert.z_score, 2),
         "detected_at": alert.detected_at.isoformat(),
         "triaged": triage is not None,
@@ -548,8 +629,19 @@ def _alert_summary(alert: Alert) -> dict:
 async def store_run(run_data: dict):
     from datetime import datetime
     run_data["timestamp"] = run_data.get("timestamp", datetime.utcnow().isoformat())
-    run_data["run_id"] = len(AppState.simulation_runs) + 1
-    AppState.simulation_runs.append(run_data)
+
+    if AppState.db:
+        run_id = AppState.db.save_simulation_run(run_data)
+        run_data["run_id"] = run_id
+    else:
+        run_data["run_id"] = len(AppState.simulation_runs) + 1
+
+    if AppState._lock:
+        async with AppState._lock:
+            AppState.simulation_runs.append(run_data)
+    else:
+        AppState.simulation_runs.append(run_data)
+
     return {"status": "stored", "run_id": run_data["run_id"]}
 
 

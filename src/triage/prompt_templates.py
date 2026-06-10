@@ -72,16 +72,71 @@ When the verdict is ESCALATE or REVIEW, cite the applicable regulation in your r
 """
 
 
+def _get_jurisdiction_context(jurisdiction: str) -> str:
+    """Return jurisdiction-specific regulatory guidance for the triage prompt."""
+    contexts = {
+        "EU": (
+            "Jurisdiction: European Union (MAR/MiFID II)\n"
+            "  - Primary regulation: EU Market Abuse Regulation (MAR) No 596/2014\n"
+            "  - Market manipulation: Article 12(1)(a) — fictitious devices, price positioning\n"
+            "  - Obligation to report: Article 16 — suspicious transaction reports (STORs) to NCA\n"
+            "  - Penalties: Up to EUR 5M (individuals) / EUR 15M or 15% turnover (firms)\n"
+            "  - Reporting deadline: STORs must be filed 'without delay' upon reasonable suspicion"
+        ),
+        "US": (
+            "Jurisdiction: United States (SEC/CFTC)\n"
+            "  - Primary regulation: Securities Exchange Act §9(a), SEC Rule 10b-5\n"
+            "  - Dodd-Frank Act §747 (anti-manipulation for swaps/commodities)\n"
+            "  - Obligation to report: SAR filing via FinCEN within 30 days\n"
+            "  - Penalties: Up to $5M and/or 20 years imprisonment per violation\n"
+            "  - Additional: FINRA Rule 5210 (manipulation), Rule 6140 (anti-spoofing)"
+        ),
+        "UK": (
+            "Jurisdiction: United Kingdom (FCA)\n"
+            "  - Primary regulation: UK MAR (retained EU law), Financial Services Act 2012 §89-91\n"
+            "  - FCA Handbook MAR 1.6 — manipulating transactions\n"
+            "  - Obligation to report: STORs to FCA within 'without delay'\n"
+            "  - Penalties: Unlimited fines, up to 7 years imprisonment\n"
+            "  - Additional: FCA Decision Procedure and Penalties Manual (DEPP)"
+        ),
+        "IN": (
+            "Jurisdiction: India (SEBI)\n"
+            "  - Primary regulation: SEBI (Prohibition of Fraudulent & Unfair Trade Practices) Regulations 2003\n"
+            "  - Reg 4(2)(a): market manipulation, Reg 4(2)(c): wash sales, Reg 4(2)(e): marking close\n"
+            "  - Obligation to report: STR to FIU-IND under PMLA 2002\n"
+            "  - Penalties: Up to INR 25 Cr or 3x profit, disgorgement + interest\n"
+            "  - Additional: SEBI Circular SEBI/HO/ISD/ISD-SEC-4/P/CIR/2023/155"
+        ),
+        "JP": (
+            "Jurisdiction: Japan (JFSA/SESC)\n"
+            "  - Primary regulation: Financial Instruments and Exchange Act (FIEA) Art. 157-159\n"
+            "  - Market manipulation: Art. 159 — prohibited manipulative acts\n"
+            "  - Obligation to report: To Securities and Exchange Surveillance Commission (SESC)\n"
+            "  - Penalties: Up to JPY 10M and/or 10 years imprisonment"
+        ),
+    }
+    return contexts.get(jurisdiction, (
+        "Jurisdiction: UNKNOWN — apply general anti-manipulation principles.\n"
+        "  Consider both MAR (EU), SEC Rule 10b-5 (US), and SEBI PFUTP (India) standards.\n"
+        "  Flag for jurisdiction determination before filing any regulatory report."
+    ))
+
+
 def build_user_prompt(alert: Alert, profile: TraderProfile, prior_alert_count: int,
                       on_watchlist: bool) -> str:
     """Build the dynamic per-alert user prompt."""
     evidence_str = json.dumps(alert.evidence, indent=2)
+    # Jurisdiction-specific regulatory context
+    jurisdiction = getattr(alert, 'jurisdiction', 'UNKNOWN')
+    jurisdiction_context = _get_jurisdiction_context(jurisdiction)
+
     return f"""ALERT TO TRIAGE:
 
 Alert ID: {alert.alert_id}
 Pattern Type: {alert.pattern_type}
 Trader: {alert.trader_id}
 Instrument: {alert.instrument}
+Jurisdiction: {jurisdiction}
 Detection Time: {alert.detected_at.isoformat()}
 Severity: {alert.severity}
 
@@ -101,8 +156,12 @@ TRADER CONTEXT:
 - Prior alerts (last 90 days): {prior_alert_count}
 - Beneficial owner group: {"flagged" if profile.beneficial_owner_id else "none"}
 
+REGULATORY CONTEXT:
+{jurisdiction_context}
+
 Triage this alert. The higher the z_score and the less the account_type explains the behaviour,
-the lower the false_positive_probability should be."""
+the lower the false_positive_probability should be. Cite the applicable jurisdiction-specific
+regulation in your rationale."""
 
 
 def build_batch_user_prompt(alerts: list[Alert], profiles: dict, prior_counts: dict,

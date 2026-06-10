@@ -171,6 +171,9 @@ async def _ensure_ready() -> None:
         if not alerts and AppState.engine:
             alerts = await asyncio.to_thread(AppState.engine.run, scenario_df)
             AppState.alerts = alerts
+            # Persist newly detected alerts to DB
+            if AppState.db:
+                AppState.db.save_alerts(alerts)
 
         _cache.update(
             {
@@ -281,6 +284,12 @@ async def _generate_stream() -> AsyncGenerator[str, None]:
                 triage_map[alert.alert_id] = triage
                 # Sync to AppState immediately so feedback buttons work
                 _AppState.triage_results[alert.alert_id] = triage
+                # Persist triage result to DB
+                if _AppState.db:
+                    try:
+                        _AppState.db.save_triage(triage)
+                    except Exception as e:
+                        print(f"  [DB] Error saving triage: {e}")
                 if is_fp:
                     fp_intercepted += 1
                 yield _sse(_verdict_dict(alert, triage, is_fp))
@@ -784,7 +793,18 @@ async def _generate_stream() -> AsyncGenerator[str, None]:
     from datetime import datetime
 
     run_record["timestamp"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    run_record["run_id"] = len(AppState.simulation_runs) + 1
+
+    # Persist simulation run to DB
+    if AppState.db:
+        try:
+            run_id = AppState.db.save_simulation_run(run_record)
+            run_record["run_id"] = run_id
+        except Exception as e:
+            print(f"  [DB] Error saving simulation run: {e}")
+            run_record["run_id"] = len(AppState.simulation_runs) + 1
+    else:
+        run_record["run_id"] = len(AppState.simulation_runs) + 1
+
     AppState.simulation_runs.append(run_record)
 
     yield _sse(

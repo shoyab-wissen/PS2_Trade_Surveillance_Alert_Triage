@@ -17,6 +17,18 @@ class TraderStats:
     close_volume_fraction_std: float
 
 
+@dataclass
+class MarketVolatility:
+    """Market-wide volatility context for a time window.
+    Used to normalize detector thresholds during volatile periods."""
+    avg_cancel_ratio: float = 0.30       # market-wide average cancel ratio
+    avg_price_volatility: float = 0.005  # average |price_change|/price per window
+    avg_volume_per_window: float = 10000.0
+    total_participants: int = 100
+    # Scaling factor: 1.0 = normal, >1.0 = elevated volatility
+    volatility_factor: float = 1.0
+
+
 class BaselineStats:
     def __init__(self, baseline_df: pd.DataFrame):
         self._stats: dict[str, TraderStats] = {}
@@ -212,6 +224,56 @@ class BaselineStats:
         if trader_id in self._stats:
             return self._stats[trader_id], False
         return self._market_stats, True
+
+    def compute_market_volatility(self, scenario_df: pd.DataFrame, window_minutes: int = 5) -> MarketVolatility:
+        """Compute market-wide volatility from scenario data for threshold normalization."""
+        if scenario_df is None or scenario_df.empty:
+            return MarketVolatility()
+
+        df = scenario_df.copy()
+        if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+
+        # Market-wide cancel ratio
+        total_places = len(df[df["event_type"] == "ORDER_PLACE"])
+        total_cancels = len(df[df["event_type"] == "ORDER_CANCEL"])
+        total_ops = total_places + total_cancels
+        mkt_cancel_ratio = total_cancels / total_ops if total_ops > 0 else 0.3
+
+        # Price volatility: average absolute price change per instrument
+        exec_df = df[df["event_type"] == "TRADE_EXECUTE"].copy()
+        price_vols = []
+        if not exec_df.empty:
+            for instr, grp in exec_df.groupby("instrument"):
+                prices = grp.sort_values("timestamp")["price"]
+                if len(prices) > 1:
+                    pct_changes = prices.pct_change().dropna().abs()
+                    price_vols.append(float(pct_changes.mean()))
+        avg_price_vol = float(np.mean(price_vols)) if price_vols else 0.005
+
+        # Total participants
+        total_participants = df["trader_id"].nunique()
+
+        # Average volume per window
+        avg_vol = float(exec_df["quantity"].sum() / max(total_participants, 1)) if not exec_df.empty else 10000.0
+
+        # Volatility factor: compare current cancel ratio and price vol to baseline
+        baseline_cr = self._market_stats.cancel_ratio_mean if self._market_stats else 0.3
+        cr_ratio = mkt_cancel_ratio / max(baseline_cr, 0.01)
+        vol_ratio = avg_price_vol / 0.005  # normalized to typical 0.5% price volatility
+
+        # Factor: geometric mean of cancel ratio surge and price volatility surge
+        # Clamped to [0.5, 3.0] — never suppress more than 50%, never relax more than 3x
+        raw_factor = (cr_ratio * vol_ratio) ** 0.5
+        volatility_factor = float(np.clip(raw_factor, 0.5, 3.0))
+
+        return MarketVolatility(
+            avg_cancel_ratio=round(mkt_cancel_ratio, 4),
+            avg_price_volatility=round(avg_price_vol, 6),
+            avg_volume_per_window=round(avg_vol, 2),
+            total_participants=total_participants,
+            volatility_factor=round(volatility_factor, 3),
+        )
 
     def z_score(self, trader_id: str, metric: str, observed: float) -> float:
         """

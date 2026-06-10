@@ -366,7 +366,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--font-ui);display:f
 
 <script>
 const $=id=>document.getElementById(id);
-const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 /* NAV */
 document.querySelectorAll('.sb-item[data-page]').forEach(btn=>{

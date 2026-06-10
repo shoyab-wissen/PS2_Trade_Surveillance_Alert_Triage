@@ -511,7 +511,7 @@ let lastMetrics={};
 
 /* === HELPERS === */
 const $=function(id){return document.getElementById(id)};
-const esc=function(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')};
+const esc=function(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')};
 function bump(id,n){
   var el=$(id);if(!el)return;
   var old=parseInt(el.textContent)||0;
@@ -834,18 +834,18 @@ function submitFeedback(aid,correct,corrected){
     .then(function(res){return res.json().then(function(data){return{ok:res.ok,data:data}})})
     .then(function(r){
       if(r.ok)fb.innerHTML='<span class="fb-done">Feedback recorded - few-shot example #'+((r.data.few_shot_examples_stored)||1)+' stored</span>';
-      else fb.innerHTML='<span class="fb-err">'+(r.data.detail||'Error')+'</span>';
+      else fb.innerHTML='<span class="fb-err">'+esc(r.data.detail||'Error')+'</span>';
     }).catch(function(){fb.innerHTML='<span class="fb-err">Network error</span>'});
 }
 
 function showOverride(aid){
   var fb=$('fb-'+aid);if(!fb)return;
-  fb.innerHTML='<select class="fb-sel" id="sel-'+aid+'"><option value="ESCALATE">ESCALATE</option><option value="REVIEW">REVIEW</option><option value="DISMISS">DISMISS</option></select><button class="fb-btn fb-override" onclick="submitFeedback(\''+aid+'\',false,document.getElementById(\'sel-'+aid+'\').value)">Submit</button><button class="fb-btn" style="color:var(--text-dim);border-color:var(--border)" onclick="restoreFeedback(\''+aid+'\')">Cancel</button>';
+  var ea=esc(aid);fb.innerHTML='<select class="fb-sel" id="sel-'+ea+'"><option value="ESCALATE">ESCALATE</option><option value="REVIEW">REVIEW</option><option value="DISMISS">DISMISS</option></select><button class="fb-btn fb-override" onclick="submitFeedback(\''+ea+'\',false,document.getElementById(\'sel-'+ea+'\').value)">Submit</button><button class="fb-btn" style="color:var(--text-dim);border-color:var(--border)" onclick="restoreFeedback(\''+ea+'\')">Cancel</button>';
 }
 
 function restoreFeedback(aid){
   var fb=$('fb-'+aid);if(!fb)return;
-  fb.innerHTML='<button class="fb-btn fb-agree" onclick="submitFeedback(\''+aid+'\',true)">Agree</button><button class="fb-btn fb-override" onclick="showOverride(\''+aid+'\')">Override</button>';
+  var ea=esc(aid);fb.innerHTML='<button class="fb-btn fb-agree" onclick="submitFeedback(\''+ea+'\',true)">Agree</button><button class="fb-btn fb-override" onclick="showOverride(\''+ea+'\')">Override</button>';
 }
 
 function investigateTrader(tid){
@@ -854,7 +854,7 @@ function investigateTrader(tid){
   fetch('/traders/'+tid+'/investigate',{method:'POST'})
     .then(function(res){return res.json()})
     .then(function(d){renderInvestigation(tid,d)})
-    .catch(function(e){showModal('Investigation Error','<span class="fb-err">'+e.message+'</span>')});
+    .catch(function(e){showModal('Investigation Error','<span class="fb-err">'+esc(e.message)+'</span>')});
 }
 
 function renderInvestigation(tid,d){
